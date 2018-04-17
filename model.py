@@ -28,26 +28,35 @@ class VLSTM(nn.Module):
         h, _ = self.lstm(h, (h_0, c_0))
         return pad_packed_sequence(h)
 
-class PBLSTM(VLSTM):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, bidirectional=True, num_layers=1, **kwargs)
+class SequencePooling(nn.Module):
     def forward(self, seqs, seq_lens):
-        seqs, seq_lens = super().forward(seqs, seq_lens)
         if seqs.shape[0] % 2 == 1:  # odd number of timestamps
             seqs = seqs[:-1]        # remove the last frame
         L, N, C = seqs.shape
         # (L, N, C) -> (N, L, C) -> (N, L/2, C*2) -> (L/2, N, C*2)
         seqs = seqs.transpose(0, 1).view(N, L / 2, C * 2).transpose(0, 1).contiguous()
-        return seqs, seq_lens / 2
+        seq_lens = seq_lens / 2
+        return seqs, seq_lens
+
+class PBLSTM(nn.Module):
+    def __init__(self, input_size, hidden_size):
+        super().__init__()
+        self.pooling = SequencePooling()
+        self.blstm = VLSTM(input_size=input_size * 2, hidden_size=hidden_size, bidirectional=True)
+
+    def forward(self, seqs, seq_lens):
+        seqs, seq_lens = self.pooling(seqs, seq_lens)
+        seqs, seq_lens = self.blstm(seqs, seq_lens)
+        return seqs, seq_lens
 
 class Listener(nn.Module):
-    def __init__(self, input_dim):
+    def __init__(self, input_size, hidden_size=256):
         super().__init__()
         self.blstms = nn.ModuleList([
-            VLSTM(input_size=input_dim, hidden_size=256, bidirectional=True),
-            PBLSTM(input_size=512, hidden_size=256),
-            PBLSTM(input_size=512, hidden_size=256),
-            PBLSTM(input_size=512, hidden_size=256),
+            VLSTM(input_size=input_size, hidden_size=hidden_size, bidirectional=True),
+            PBLSTM(input_size=hidden_size*2, hidden_size=hidden_size),
+            PBLSTM(input_size=hidden_size*2, hidden_size=hidden_size),
+            PBLSTM(input_size=hidden_size*2, hidden_size=hidden_size),
         ])
 
     def forward(self, seqs, seq_lens):
