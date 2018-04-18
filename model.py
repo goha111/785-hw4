@@ -12,6 +12,19 @@ def initializer(m):
         elif 'bias' in name:
             param.data.zero_()
 
+class StackedLSTMCell(nn.Module):
+    def __init__(self, input_size, hidden_size, num_layers):
+        super().__init__()
+        self.lstm_cell_stack = nn.ModuleList()
+        for i in range(num_layers):
+            self.lstm_cell_stack.append(nn.LSTMCell(input_size if i == 0 else hidden_size, hidden_size))
+
+    def forward(self, input, hidden, cell):
+        for i, lstm in enumerate(self.lstm_cell_stack):
+            hidden[i], cell[i] = lstm(input, (hidden[i], cell[i]))
+            input = hidden[i]
+        return hidden, cell
+
 class VLSTM(nn.Module):
     def __init__(self, *args, **kwargs):
         super().__init__()
@@ -26,7 +39,8 @@ class VLSTM(nn.Module):
         c_0 = self.c_0.expand(-1, batch_size, -1).contiguous()
         h = pack_padded_sequence(seqs, seq_lens)
         h, _ = self.lstm(h, (h_0, c_0))
-        return pad_packed_sequence(h)
+        seqs, seq_lens = pad_packed_sequence(h)
+        return seqs, seq_lens
 
 class SequencePooling(nn.Module):
     def forward(self, seqs, seq_lens):
@@ -65,12 +79,42 @@ class Listener(nn.Module):
         return seqs, seq_lens
 
 class Speller(nn.Module):
-    def __init__(self):
+    def __init__(self, char_dict_size, input_size, hidden_size, query_size=):
         super().__init__()
-        # TODO
+        self.char_dict_size = char_dict_size
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.embedding = nn.Embedding(char_dict_size, input_size)
+        self.inith = nn.ParameterList()
+        self.initc = nn.ParameterList()
+        self.rnns = nn.ModuleList()
+        for i in range(3):
+            self.inith.append(nn.Parameter(torch.zeros(1, hidden_size)))
+            self.initc.append(nn.Parameter(torch.zeros(1, hidden_size)))
+            self.rnns.append(nn.LSTMCell(hidden_size, hidden_size))
 
-    def forward(self, *input):
-        pass
+        # map hidden states to queries
+        self.query_layer = nn.ModuleList([
+            nn.Linear(, input_size*2)
+        ])
+
+        self.
+
+        self.leaky_relu = nn.LeakyReLU(.2)
+
+    # seqs(h): (Lmax, N, C)
+    # seq_lens: (N)
+    # transcript(y): (max_trans_len, N, char_size)
+    # transcript_lens: (N)
+    def forward(self, seqs, seq_lens, transcript, transcript_lens):
+        T = seqs.shape[0]
+
+
+
+
+        for t in range(T):
+
+
 
 class LASModel(nn.Module):
     def __init__(self):
@@ -84,6 +128,7 @@ class LASModel(nn.Module):
 
         decoder_h0 = nn.Parameter(torch.zeros(1, ))
         decoder_c0 = nn.Parameter(torch.zeros(1, ))
+
         # TODO
         self.apply(initializer)
 
