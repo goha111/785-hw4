@@ -20,7 +20,7 @@ def unigram_logits(stat, smoothing=.01):
 def main(args):
     xvalid, yvalid = load_data('dev')
     valid_loader = DataLoader(xvalid, yvalid, batch_size=args.batch_size)
-    for i, (seq, seq_len, label_in, label_out, label_len) in enumerate(valid_loader):
+    for i, (seq, seq_len, label_in, label_out, label_len, label_mask) in enumerate(valid_loader):
         print(i)
 
 if __name__ == '__main__':
