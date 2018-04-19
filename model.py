@@ -151,15 +151,15 @@ class Speller(nn.Module):
 
     # seqs(h): (Lmax, N, C)
     # seq_lens: (N)
-    # transcript(y): (max_trans_len, N)
-    # transcript_lens: (N)
-    def forward(self, seqs, seq_lens, transcripts, transcript_lens):
-        T, N = transcripts.shape
+    # label(y): (max_trans_len, N)
+    # label_lens: (N)
+    def forward(self, seqs, seq_lens, labels, label_lens):
+        T, N = labels.shape
         # expand initial states of LSTMCell to batch size
         hidden = [tensor.repeat(N, 1) for tensor in self.inith]
         cell = [tensor.repeat(N, 1) for tensor in self.initc]
         output = torch.zeros((T, N, self.char_dict_size))
-        char_input = self.embedding(transcripts)     # (max_trans_len, N, E)
+        char_input = self.embedding(labels)     # (max_trans_len, N, E)
         key = self.key_net(seqs).transpose(0, 1)        # (L, N, input_size) -> (L, N, Q) -> (N, L, Q)
         value = self.value_net(seqs).transpose(0, 1)    # (L, N, input_size) -> (L, N, V) -> (N, L, V)
         query = self.query_net(hidden[-1]).unsqueeze(-1)    # (N, hidden_size) -> (N, Q) -> (N, Q, 1)
@@ -181,6 +181,7 @@ class LASModel(nn.Module):
         self.speller = Speller()
         self.apply(initializer)
 
-    def forward(self, seqs, seq_lens, transcripts, transcript_lens):
+    def forward(self, seqs, seq_lens, labels, label_lens):
         h, h_len = self.listener(seqs, seq_lens)
-        output = self.speller(h, h_len, transcripts, transcript_lens)
+        output = self.speller(h, h_len, labels, label_lens)
+        return output
