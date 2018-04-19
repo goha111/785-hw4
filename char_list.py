@@ -6,3 +6,5 @@ DECODE_MAP = ['<', ' ', "'", '+', '-', '.', 'A', 'B', 'C', 'D', 'E', 'F', 'G', '
               'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '_', '>']
 
 CHAR_SIZE = len(ENCODE_MAP)
+SOS = '<'
+EOS = '>'

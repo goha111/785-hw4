@@ -1,5 +1,8 @@
+import argparse
+import numpy as np
 import torch
 import torch.nn as nn
+from torch.autograd import Variable
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 import torch.nn.functional as F
 
@@ -10,6 +13,51 @@ def initializer(m):
             nn.init.xavier_uniform(param.data)
         elif 'bias' in name:
             param.data.zero_()
+
+class DataLoader():
+    def __init__(self, x, y, batch_size=16):
+        self.x = x
+        self.y = y
+        assert(len(x) == len(y))
+        self.batch_size = batch_size
+        self.size = len(x)
+        self.channel = x[0].shape[1]
+        self.perm_idx = np.arange(self.size)
+        self.len = ((self.size - self.batch_size) // self.batch_size) + 1
+
+    def __iter__(self):
+        np.random.shuffle(self.perm_idx)
+        for i in range(0, self.size - self.batch_size, self.batch_size):
+            idx = self.perm_idx[i:i + self.batch_size]
+            seqs, labels = self.x[idx], self.y[idx]
+            seq_lengths = torch.IntTensor(list(map(lambda x: x.shape[0], seqs)))
+            label_lengths = torch.IntTensor(list(map(lambda x: x.shape[0], labels))) - 1
+            max_seq_len = seq_lengths.max()
+            max_label_len = label_lengths.max()
+
+            # allocate spaces for padded seqs and labels
+            seq_padded = torch.FloatTensor(self.batch_size, max_seq_len, self.channel).zero_()  # (n, max_len, channel)
+            label_in_padded = torch.IntTensor(self.batch_size, max_label_len).zero_()
+            label_out_padded = torch.IntTensor(self.batch_size, max_label_len).zero_()
+
+            for i, (seq, seq_len, label, label_len) in enumerate(zip(seqs, seq_lengths, labels, label_lengths)):
+                seq_padded[i, :seq_len, :] = seq
+                label_in_padded[i, :label_len] = label[: -1]
+                label_out_padded[i, :label_len] = label[1: ]
+
+            # sort tensors by lengths
+            seq_lengths, perm_idx = seq_lengths.sort(0, descending=True)
+            seq_lengths = Variable(seq_lengths)
+            seq_padded = Variable(seq_padded[perm_idx])
+            label_lengths = Variable(label_lengths[perm_idx])
+            label_in_padded = Variable(label_in_padded[perm_idx])
+            label_out_padded = Variable(label_out_padded[perm_idx])
+
+            # seq_padded: (n, max_len, channel)
+            # labels: (concat_labels, )
+            # seq_lengths: (n, )
+            # label_lengths: (n, )
+            yield (seq_padded, seq_lengths, label_in_padded, label_out_padded, label_lengths)
 
 class MLLSTMCell(nn.Module):
     def __init__(self, input_size, hidden_size, num_layers):
@@ -96,7 +144,7 @@ class MLP(nn.Module):
         return h
 
 class Speller(nn.Module):
-    def __init__(self, char_dict_size=34, input_size=512, hidden_size=256, query_size=64, output_bias=None):
+    def __init__(self, char_dict_size=34, input_size=512, hidden_size=256, query_size=64, projection_bias=None):
         super().__init__()
         self.char_dict_size = char_dict_size
         self.input_size = input_size
@@ -130,8 +178,8 @@ class Speller(nn.Module):
         ], self.elu)
 
         self.output_layer = nn.Linear(hidden_size*2, char_dict_size)
-        if output_bias:
-            self.output_layer.bias.data = output_bias
+        if projection_bias:
+            self.output_layer.bias.data = projection_bias
 
         # weight tying
         self.output_layer.weight= self.embedding.weight
@@ -175,10 +223,10 @@ class Speller(nn.Module):
         return output
 
 class LASModel(nn.Module):
-    def __init__(self):
+    def __init__(self, projection_bias=None):
         super().__init__()
         self.listener = Listener()
-        self.speller = Speller()
+        self.speller = Speller(projection_bias=projection_bias)
         self.apply(initializer)
 
     def forward(self, seqs, seq_lens, labels, label_lens):
