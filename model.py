@@ -3,7 +3,6 @@ import torch.nn as nn
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 import torch.nn.functional as F
 
-CUDA_AVAILABLE = torch.cuda.is_available()
 
 def initializer(m):
     for name, param in m.named_parameters():
@@ -12,15 +11,15 @@ def initializer(m):
         elif 'bias' in name:
             param.data.zero_()
 
-class StackedLSTMCell(nn.Module):
+class MLLSTMCell(nn.Module):
     def __init__(self, input_size, hidden_size, num_layers):
         super().__init__()
-        self.lstm_cell_stack = nn.ModuleList()
+        self.lstm_layers = nn.ModuleList()
         for i in range(num_layers):
-            self.lstm_cell_stack.append(nn.LSTMCell(input_size if i == 0 else hidden_size, hidden_size))
+            self.lstm_layers.append(nn.LSTMCell(input_size if i == 0 else hidden_size, hidden_size))
 
     def forward(self, input, hidden, cell):
-        for i, lstm in enumerate(self.lstm_cell_stack):
+        for i, lstm in enumerate(self.lstm_layers):
             hidden[i], cell[i] = lstm(input, (hidden[i], cell[i]))
             input = hidden[i]
         return hidden, cell
@@ -64,7 +63,7 @@ class PBLSTM(nn.Module):
         return seqs, seq_lens
 
 class Listener(nn.Module):
-    def __init__(self, input_size, hidden_size=256):
+    def __init__(self, input_size=40, hidden_size=256):
         super().__init__()
         self.blstms = nn.ModuleList([
             VLSTM(input_size=input_size, hidden_size=hidden_size, bidirectional=True),
@@ -78,59 +77,110 @@ class Listener(nn.Module):
             seqs, seq_lens = module(seqs, seq_lens)
         return seqs, seq_lens
 
+class MLP(nn.Module):
+    def __init__(self, layers, activation=None):
+        super().__init__()
+        self.layers = nn.ModuleList(layers)
+        if activation:
+            self.activation = activation
+        else:
+            self.activation = nn.ReLU()
+
+    def forward(self, input):
+        h = input
+        for i, module in enumerate(self.layers):
+            if i == len(self.layers) - 1:
+                h = module(h)
+            else:
+                h = self.activation(module(h))
+        return h
+
 class Speller(nn.Module):
-    def __init__(self, char_dict_size, input_size, hidden_size, query_size=):
+    def __init__(self, char_dict_size=34, input_size=512, hidden_size=256, query_size=64, output_bias=None):
         super().__init__()
         self.char_dict_size = char_dict_size
         self.input_size = input_size
         self.hidden_size = hidden_size
-        self.embedding = nn.Embedding(char_dict_size, input_size)
+        self.embedding = nn.Embedding(char_dict_size, hidden_size)
+        self.init_context = nn.Parameter((torch.zeros(1, hidden_size)))
         self.inith = nn.ParameterList()
         self.initc = nn.ParameterList()
-        self.rnns = nn.ModuleList()
+        self.rnns = MLLSTMCell(input_size=hidden_size*2, hidden_size=hidden_size, num_layers=3)
+        self.elu = nn.ELU()
         for i in range(3):
             self.inith.append(nn.Parameter(torch.zeros(1, hidden_size)))
             self.initc.append(nn.Parameter(torch.zeros(1, hidden_size)))
-            self.rnns.append(nn.LSTMCell(hidden_size, hidden_size))
 
         # map hidden states to queries
-        self.query_layer = nn.ModuleList([
-            nn.Linear(, input_size*2)
-        ])
+        self.query_net = MLP([
+            nn.Linear(hidden_size, hidden_size),
+            nn.Linear(hidden_size, query_size)
+        ], self.elu)
 
-        self.
+        # map input to keys
+        self.key_net = MLP([
+            nn.Linear(input_size, input_size),
+            nn.Linear(input_size, query_size)
+        ], self.elu)
 
-        self.leaky_relu = nn.LeakyReLU(.2)
+        # map input to values
+        self.value_net = MLP([
+            nn.Linear(input_size, hidden_size),
+            nn.Linear(hidden_size, hidden_size)
+        ], self.elu)
+
+        self.output_layer = nn.Linear(hidden_size*2, char_dict_size)
+        if output_bias:
+            self.output_layer.bias.data = output_bias
+
+        # weight tying
+        self.output_layer.weight= self.embedding.weight
+
+    # query:    (N, Q, 1)
+    # key:      (N, L, Q)
+    # value:    (N, L, V)
+    # return    (N, V)
+    def attention_context(self, query, key, value):
+        # (N, L, Q) @ (N, Q, 1) -> (N, L, 1) -> (N, 1, L) -> softmax along L -> (N, 1, L)
+        # TODO: here should use masked softmax, and the result should be normalized with respect to the length of L
+        attention = F.softmax(torch.bmm(key, query).transpose(1, 2), dim=2)
+
+        # (N, 1, L) @ (N, L, V) -> (N, 1, V) -> (N, V)
+        context = torch.bmm(attention, value).view(attention.shape[0], -1)
+        return context
 
     # seqs(h): (Lmax, N, C)
     # seq_lens: (N)
-    # transcript(y): (max_trans_len, N, char_size)
+    # transcript(y): (max_trans_len, N)
     # transcript_lens: (N)
-    def forward(self, seqs, seq_lens, transcript, transcript_lens):
-        T = seqs.shape[0]
-
-
-
-
+    def forward(self, seqs, seq_lens, transcripts, transcript_lens):
+        T, N = transcripts.shape
+        # expand initial states of LSTMCell to batch size
+        hidden = [tensor.repeat(N, 1) for tensor in self.inith]
+        cell = [tensor.repeat(N, 1) for tensor in self.initc]
+        output = torch.zeros((T, N, self.char_dict_size))
+        char_input = self.embedding(transcripts)     # (max_trans_len, N, E)
+        key = self.key_net(seqs).transpose(0, 1)        # (L, N, input_size) -> (L, N, Q) -> (N, L, Q)
+        value = self.value_net(seqs).transpose(0, 1)    # (L, N, input_size) -> (L, N, V) -> (N, L, V)
+        query = self.query_net(hidden[-1]).unsqueeze(-1)    # (N, hidden_size) -> (N, Q) -> (N, Q, 1)
+        prev_context = self.attention_context(query, key, value)    # (N, V)
         for t in range(T):
-
-
+            # (N, E) concat (N, V) -> (N, E+V)
+            rnn_input = torch.cat((prev_context, char_input[t]), dim=1)
+            hidden, cell = self.rnns(rnn_input, hidden, cell)
+            query = self.query_net(hidden[-1]).unsqueeze(-1)
+            curr_context = self.attention_context(query, key, value)
+            output[t,:,:] = self.output_layer(torch.cat((curr_context, hidden)))
+            prev_context = curr_context
+        return output
 
 class LASModel(nn.Module):
     def __init__(self):
         super().__init__()
-        self.Phi = nn.ModuleList([
-
-        ])
-        self.Psi = nn.ModuleList([
-
-        ])
-
-        decoder_h0 = nn.Parameter(torch.zeros(1, ))
-        decoder_c0 = nn.Parameter(torch.zeros(1, ))
-
-        # TODO
+        self.listener = Listener()
+        self.speller = Speller()
         self.apply(initializer)
 
-    def forward(self, input, forward=0):
-        pass
+    def forward(self, seqs, seq_lens, transcripts, transcript_lens):
+        h, h_len = self.listener(seqs, seq_lens)
+        output = self.speller(h, h_len, transcripts, transcript_lens)
