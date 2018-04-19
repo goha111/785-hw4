@@ -35,15 +35,17 @@ class DataLoader():
             max_seq_len = seq_lengths.max()
             max_label_len = label_lengths.max()
 
-            # allocate spaces for padded seqs and labels
+            # allocate spaces
             seq_padded = torch.FloatTensor(self.batch_size, max_seq_len, self.channel).zero_()  # (n, max_len, channel)
             label_in_padded = torch.IntTensor(self.batch_size, max_label_len).zero_()
             label_out_padded = torch.IntTensor(self.batch_size, max_label_len).zero_()
+            label_mask = torch.FloatTensor(self.batch_size, max_label_len).zero_()
 
             for i, (seq, seq_len, label, label_len) in enumerate(zip(seqs, seq_lengths, labels, label_lengths)):
-                seq_padded[i, :seq_len, :] = seq
-                label_in_padded[i, :label_len] = label[: -1]
-                label_out_padded[i, :label_len] = label[1: ]
+                seq_padded[i, :seq_len, :] = torch.FloatTensor(seq)
+                label_in_padded[i, :label_len] = torch.FloatTensor(label[: -1])
+                label_out_padded[i, :label_len] = torch.FloatTensor(label[1: ])
+                label_mask[i, :label_len] = 1
 
             # sort tensors by lengths
             seq_lengths, perm_idx = seq_lengths.sort(0, descending=True)
@@ -52,12 +54,13 @@ class DataLoader():
             label_lengths = Variable(label_lengths[perm_idx])
             label_in_padded = Variable(label_in_padded[perm_idx])
             label_out_padded = Variable(label_out_padded[perm_idx])
+            label_mask = Variable(label_mask[perm_idx])
 
             # seq_padded: (n, max_len, channel)
             # labels: (concat_labels, )
             # seq_lengths: (n, )
             # label_lengths: (n, )
-            yield (seq_padded, seq_lengths, label_in_padded, label_out_padded, label_lengths)
+            yield (seq_padded, seq_lengths, label_in_padded, label_out_padded, label_lengths, label_mask)
 
 class MLLSTMCell(nn.Module):
     def __init__(self, input_size, hidden_size, num_layers):
