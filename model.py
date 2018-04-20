@@ -243,7 +243,7 @@ class Speller(nn.Module):
         for i, seq_len in enumerate(seq_lens):
             attention_mask[i, :seq_len] = 1
         attention_mask = Variable(attention_mask).unsqueeze(1)   # (N, L) -> (N, 1, L)
-        attention = (attention * attention_mask).clamp(min=0.)   # multiplied by mask  (N, 1, L) and make it num stable
+        attention = (attention * attention_mask).clamp(min=1e-9)   # multiplied by mask  (N, 1, L) and make it num stable
         attention_sum = attention.sum(dim=2, keepdim=True)    # (N, 1, 1) and it will auto broadcast
         attention = attention / attention_sum
 
