@@ -93,7 +93,7 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--batch-size', '-b', dest='batch_size', type=int, default=16)
+    parser.add_argument('--batch-size', '-b', dest='batch_size', type=int, default=32)
     parser.add_argument('--model', '-m', dest='model', type=str, default=None)
     parser.add_argument('--print-freq', dest='print_freq', type=int, default=10)
     parser.add_argument('--epoch', dest='epoch', type=int, default=30)

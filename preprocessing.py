@@ -30,7 +30,10 @@ stat.sort(key=lambda x: x[0])
 
 # add SOS and EOS
 count[SOS] = count[EOS] = len(trans)
-stat = [(SOS, len(trans))] + stat + [(EOS, len(trans))]
+if EOS != SOS:
+    stat = [(SOS, len(trans))] + stat + [(EOS, len(trans))]
+else:
+    stat = [(SOS, 2*len(trans))] + stat
 
 char_map = dict()
 index_map = []
