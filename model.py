@@ -130,7 +130,7 @@ class VLSTM(nn.Module):
     def forward(self, seqs, seq_lens):
         batch_size = seqs.shape[1]
         h_0 = self.h_0.expand(-1, batch_size, -1).contiguous()
-        c_0 = self.c_0.expand(-1, batch_size, -1).contiguous()
+        c_0 = Variable(h_0.data.new(h_0.shape).zero_())
         input = pack_padded_sequence(seqs, seq_lens)
         output, _ = self.lstm(input, (h_0, c_0))
         seqs, _ = pad_packed_sequence(output)
@@ -198,11 +198,9 @@ class Speller(nn.Module):
         self.hidden_size = hidden_size
         self.embedding = nn.Embedding(char_dict_size, hidden_size)
         self.inith = nn.ParameterList()
-        self.initc = nn.ParameterList()
         self.rnns = MLLSTMCell(input_size=hidden_size*2, hidden_size=hidden_size, num_layers=3, dropout=.2)
         for i in range(3):
             self.inith.append(nn.Parameter(torch.zeros(1, hidden_size)))
-            self.initc.append(nn.Parameter(torch.zeros(1, hidden_size)))
 
         activation = nn.ELU()
         # map hidden states to queries
@@ -251,7 +249,7 @@ class Speller(nn.Module):
         attention_mask = Variable(attention_mask).unsqueeze(1)   # (N, L) -> (N, 1, L)
         attention = (attention * attention_mask).clamp(min=1e-9)   # multiplied by mask (N, 1, L) and make it num stable
         attention_sum = attention.sum(dim=2, keepdim=True)    # (N, 1, 1) and it will auto broadcast
-        attention = attention / attention_sum
+        attention = attention / attention_sum     # re-normalize the attention weights
 
         # (N, 1, L) @ (N, L, V) -> (N, 1, V) -> (N, V)
         context = torch.bmm(attention, value).view(N, -1)
@@ -264,7 +262,7 @@ class Speller(nn.Module):
         N, T = label_in.shape
         # expand initial states of LSTMCell to batch size
         hidden = [tensor.repeat(N, 1) for tensor in self.inith]
-        cell = [tensor.repeat(N, 1) for tensor in self.initc]
+        cell = [Variable(h.data.new(h.shape).zero_()) for h in hidden]
         output = []
         char_input = self.embedding(label_in)     # (N, max_trans_len, E)
         key = self.key_net(seqs).transpose(0, 1)        # (L, N, input_size) -> (L, N, Q) -> (N, L, Q)
