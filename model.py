@@ -106,16 +106,17 @@ class DataLoader():
         return self.len
 
 class MLLSTMCell(nn.Module):
-    def __init__(self, input_size, hidden_size, num_layers):
+    def __init__(self, input_size, hidden_size, num_layers, dropout=0.):
         super().__init__()
         self.lstm_layers = nn.ModuleList()
+        self.dropout = nn.Dropout(dropout)
         for i in range(num_layers):
             self.lstm_layers.append(nn.LSTMCell(input_size if i == 0 else hidden_size, hidden_size))
 
     def forward(self, input, hidden, cell):
         for i, lstm in enumerate(self.lstm_layers):
             hidden[i], cell[i] = lstm(input, (hidden[i], cell[i]))
-            input = hidden[i]
+            input = self.dropout(hidden[i])
         return hidden, cell
 
 class VLSTM(nn.Module):
@@ -243,7 +244,7 @@ class Speller(nn.Module):
 
         # (N, L, Q) @ (N, Q, 1) -> (N, L, 1) -> (N, 1, L) -> softmax along L -> (N, 1, L)
         attention = F.softmax(torch.bmm(key, query).transpose(1, 2), dim=2)
-        attention_mask = attention.data.new(N, L).zero_()
+        attention_mask = attention.data.new(N, L).zero_()   # create mask on the same device and set to zeros
         for i, seq_len in enumerate(seq_lens):
             attention_mask[i, :seq_len] = 1.
         attention_mask = Variable(attention_mask).unsqueeze(1)   # (N, L) -> (N, 1, L)
