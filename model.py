@@ -13,6 +13,11 @@ def initializer(m):
             nn.init.xavier_uniform(param.data)
         elif 'bias' in name:
             param.data.zero_()
+        elif param.dim() == 1:
+            nn.init.xavier_uniform(param.data)
+
+def to_variable(array):
+    return Variable(torch.from_numpy(array).contiguous())
 
 class AverageMeter():
     """Computes and stores the average and current value"""
@@ -42,7 +47,6 @@ class DataLoader():
     def __init__(self, x, y, batch_size=16):
         self.x = x
         self.y = y
-        assert(len(x) == len(y))
         self.batch_size = batch_size
         self.size = len(x)
         self.channel = x[0].shape[1]
@@ -61,31 +65,29 @@ class DataLoader():
             max_label_len = label_lengths.max()
 
             # allocate spaces
-            seq_padded = torch.FloatTensor(self.batch_size, max_seq_len, self.channel).zero_()  # (n, max_len, channel)
-            label_in_padded = torch.IntTensor(self.batch_size, max_label_len).zero_()
-            label_out_padded = torch.IntTensor(self.batch_size, max_label_len).zero_()
-            label_mask = torch.FloatTensor(self.batch_size, max_label_len).zero_()
+            seq_padded = np.zeros((self.batch_size, max_seq_len, self.channel), dtype=float)  # (n, max_len, channel)
+            label_in_padded = np.zeros((self.batch_size, max_label_len), dtype=int)
+            label_out_padded = np.zeros((self.batch_size, max_label_len), dtype=int)
+            label_mask = np.zeros((self.batch_size, max_label_len), dtype=float)
 
             for i, (seq, seq_len, label, label_len) in enumerate(zip(seqs, seq_lengths, labels, label_lengths)):
-                seq_padded[i, :seq_len, :] = torch.FloatTensor(seq)
-                label_in_padded[i, :label_len] = torch.FloatTensor(label[: -1])
-                label_out_padded[i, :label_len] = torch.FloatTensor(label[1: ])
+                seq_padded[i, :seq_len, :] = seq
+                label_in_padded[i, :label_len] = label[: -1]
+                label_out_padded[i, :label_len] = label[1: ]
                 label_mask[i, :label_len] = 1
 
             # sort tensors by lengths
             seq_lengths, perm_idx = seq_lengths.sort(0, descending=True)
-            seq_lengths = Variable(seq_lengths)
-            seq_padded = Variable(seq_padded[perm_idx]).transpose(0, 1).contiguous()
-            label_lengths = Variable(label_lengths[perm_idx])
-            label_in_padded = Variable(label_in_padded[perm_idx])
-            label_out_padded = Variable(label_out_padded[perm_idx])
-            label_mask = Variable(label_mask[perm_idx])
+            seq_padded = to_variable(seq_padded[perm_idx]).transpose(0, 1).contiguous()
+            label_in_padded = to_variable(label_in_padded[perm_idx]).long()
+            label_out_padded = to_variable(label_out_padded[perm_idx]).long()
+            label_mask = to_variable(label_mask[perm_idx]).float()
 
             # seq_padded: (max_seq_len, n, channel)
             # seq_lengths: (n,)
             # lable_length: (n,)
             # label_in_padded, label_out_padded, label_mask: (n, max_label_len)
-            yield (seq_padded, seq_lengths, label_in_padded, label_out_padded, label_lengths, label_mask)
+            yield (seq_padded, seq_lengths, label_in_padded, label_out_padded, label_mask)
 
     def __len__(self):
         return self.len
@@ -144,11 +146,9 @@ class PBLSTM(nn.Module):
 class MLP(nn.ModuleList):
     def __init__(self, layers, activation=None):
         super().__init__()
-        if activation is None:
-            activation = nn.ReLU()
         for i, layer in enumerate(layers):
             self.append(layer)
-            if i != len(layers) - 1:
+            if activation is not None and i != len(layers) - 1:
                 self.append(activation)
 
     def forward(self, input):
@@ -179,11 +179,10 @@ class Speller(nn.Module):
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.embedding = nn.Embedding(char_dict_size, hidden_size)
-        self.init_context = nn.Parameter((torch.zeros(1, hidden_size)))
         self.inith = nn.ParameterList()
         self.initc = nn.ParameterList()
         self.rnns = MLLSTMCell(input_size=hidden_size*2, hidden_size=hidden_size, num_layers=3)
-        self.elu = nn.ELU()
+        activation = nn.ReLU()
         for i in range(3):
             self.inith.append(nn.Parameter(torch.zeros(1, hidden_size)))
             self.initc.append(nn.Parameter(torch.zeros(1, hidden_size)))
@@ -192,19 +191,19 @@ class Speller(nn.Module):
         self.query_net = MLP([
             nn.Linear(hidden_size, hidden_size),
             nn.Linear(hidden_size, query_size)
-        ], self.elu)
+        ], activation)
 
         # map input to keys
         self.key_net = MLP([
             nn.Linear(input_size, input_size),
             nn.Linear(input_size, query_size)
-        ], self.elu)
+        ], activation)
 
         # map input to values
         self.value_net = MLP([
             nn.Linear(input_size, hidden_size),
             nn.Linear(hidden_size, hidden_size)
-        ], self.elu)
+        ], activation)
 
         self.output_layer = MLP([
             nn.Linear(hidden_size * 2, hidden_size),
@@ -240,7 +239,7 @@ class Speller(nn.Module):
         context = torch.bmm(attention, value).view(attention.shape[0], -1)
         return context
 
-    # seqs(h): (Lmax, N, C)
+    # seqs(h): (L, N, C)
     # seq_lens: (N)
     # label_in(y): (N, T)
     def forward(self, seqs, seq_lens, label_in):

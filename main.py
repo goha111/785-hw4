@@ -35,11 +35,9 @@ def routine(args, model, loader, optimizer, criterion, epoch, train=True):
         model.eval()
     losses = AverageMeter()
     start = time.time()
-    for i, data in enumerate(loader):
-        seq, seq_len, label_in, label_out, label_len, label_mask = to_cuda(*data)
-        seq_len = seq_len.data.cpu().numpy()   # for pack_padded_sequence
-        label_in = label_in.long()
-        label_out = label_out.long()
+    for i, (seq, seq_len, label_in, label_out, label_mask) in enumerate(loader):
+        seq, label_in, label_out, label_mask = to_cuda(seq, label_in, label_out, label_mask)
+        # seq_len = seq_len.numpy()   # for pack_padded_sequence
         logits = model(seq, seq_len, label_in).transpose(0, 1).contiguous() # (T, N, char_size) -> (N, T, char_size)
         loss_raw = criterion(logits, label_out)   # (N, T)
         loss = (loss_raw * label_mask).sum(dim=1).mean()
