@@ -15,6 +15,16 @@ def initializer(m):
         elif param.dim() == 1:
             nn.init.xavier_uniform(param.data)
 
+def sample_gumbel(shape, eps=1e-10, out=None):
+    """
+    Sample from Gumbel(0, 1)
+    based on
+    https://github.com/ericjang/gumbel-softmax/blob/3c8584924603869e90ca74ac20a6a03d99a91ef9/Categorical%20VAE.ipynb ,
+    (MIT license)
+    """
+    U = out.resize_(shape).uniform_() if out is not None else torch.rand(shape)
+    return -torch.log(eps - torch.log(U + eps))
+
 def to_variable(array):
     return Variable(torch.from_numpy(array).contiguous())
 
