@@ -14,6 +14,23 @@ def initializer(m):
         elif 'bias' in name:
             param.data.zero_()
 
+class AverageMeter():
+    """Computes and stores the average and current value"""
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.val = 0
+        self.avg = 0
+        self.sum = 0
+        self.count = 0
+
+    def update(self, val, n=1):
+        self.val = val
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count
+
 class CrossEntropyLoss3D(nn.CrossEntropyLoss):
     # input (N, L, C)
     # target(N, L)
@@ -58,7 +75,7 @@ class DataLoader():
             # sort tensors by lengths
             seq_lengths, perm_idx = seq_lengths.sort(0, descending=True)
             seq_lengths = Variable(seq_lengths)
-            seq_padded = Variable(seq_padded[perm_idx]).transpose(0, 1).continuous()
+            seq_padded = Variable(seq_padded[perm_idx]).transpose(0, 1).contiguous()
             label_lengths = Variable(label_lengths[perm_idx])
             label_in_padded = Variable(label_in_padded[perm_idx])
             label_out_padded = Variable(label_out_padded[perm_idx])
@@ -97,7 +114,7 @@ class VLSTM(nn.Module):
         c_0 = self.c_0.expand(-1, batch_size, -1).contiguous()
         h = pack_padded_sequence(seqs, seq_lens)
         h, _ = self.lstm(h, (h_0, c_0))
-        seqs, seq_lens = pad_packed_sequence(h)
+        seqs, _ = pad_packed_sequence(h)
         return seqs, seq_lens
 
 class SequencePooling(nn.Module):
@@ -106,8 +123,8 @@ class SequencePooling(nn.Module):
             seqs = seqs[:-1]        # remove the last frame
         L, N, C = seqs.shape
         # (L, N, C) -> (N, L, C) -> (N, L/2, C*2) -> (L/2, N, C*2)
-        seqs = seqs.transpose(0, 1).view(N, L / 2, C * 2).transpose(0, 1).contiguous()
-        seq_lens = seq_lens / 2
+        seqs = seqs.transpose(0, 1).contiguous().view(N, L // 2, C * 2).transpose(0, 1).contiguous()
+        seq_lens = seq_lens // 2
         return seqs, seq_lens
 
 class PBLSTM(nn.Module):
@@ -189,7 +206,7 @@ class Speller(nn.Module):
         ], self.elu)
 
         self.output_layer = nn.Linear(hidden_size*2, char_dict_size)
-        if projection_bias:
+        if projection_bias is not None:
             self.output_layer.bias.data = projection_bias
 
         # weight tying
@@ -203,17 +220,16 @@ class Speller(nn.Module):
     # return    (N, V)
     def attention_context(self, query, key, value, seq_lens):
         N = query.shape[0]
-        L = seq_lens.data.max()  # L
+        L = int(seq_lens.max())  # L
 
         # (N, L, Q) @ (N, Q, 1) -> (N, L, 1) -> (N, 1, L) -> softmax along L -> (N, 1, L)
-        # TODO: here should use masked softmax, and the result should be normalized with respect to the length of L
         attention = F.softmax(torch.bmm(key, query).transpose(1, 2), dim=2)
         attention_mask = attention.data.new(N, L)
         for i, seq_len in enumerate(seq_lens):
             attention_mask[i, :seq_len] = 1
-        attention_mask = Variable(attention_mask).unsqueeze_(1)   # (N, L) -> (N, 1, L)
+        attention_mask = Variable(attention_mask).unsqueeze(1)   # (N, L) -> (N, 1, L)
         attention = attention * attention_mask    # multiplied by mask  (N, 1, L)
-        attention_sum = attention.sum(dim=2).expand(-1, -1, L)    # (N, 1, 1)
+        attention_sum = attention.sum(dim=2, keepdim=True)    # (N, 1, 1) and it will auto broadcast
         attention = attention / attention_sum
 
         # (N, 1, L) @ (N, L, V) -> (N, 1, V) -> (N, V)
@@ -222,10 +238,10 @@ class Speller(nn.Module):
 
     # seqs(h): (Lmax, N, C)
     # seq_lens: (N)
-    # label(y): (max_trans_len, N)
+    # label(y): (N, T)
     # label_lens: (N)
     def forward(self, seqs, seq_lens, labels, label_lens):
-        T, N = labels.shape
+        N, T = labels.shape
         # expand initial states of LSTMCell to batch size
         hidden = [tensor.repeat(N, 1) for tensor in self.inith]
         cell = [tensor.repeat(N, 1) for tensor in self.initc]
@@ -237,6 +253,7 @@ class Speller(nn.Module):
         prev_context = self.attention_context(query, key, value, seq_lens)    # (N, V)
         for t in range(T):
             # (N, E) concat (N, V) -> (N, E+V)
+            # TODO: sample from prev prediction with some probability
             rnn_input = torch.cat((prev_context, char_input[t]), dim=1)
             hidden, cell = self.rnns(rnn_input, hidden, cell)
             query = self.query_net(hidden[-1]).unsqueeze(-1)
