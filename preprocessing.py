@@ -1,54 +1,71 @@
+import argparse
 import numpy as np
 
-SOS = '<'
-EOS = '>'
 
-def encode(array, char_map):
+
+def encode(args, array, char_map):
     output = []
     for s in array:
         arr = np.zeros(len(s) + 2, dtype=int)
-        arr[0] = char_map[SOS]
-        arr[-1] = char_map[EOS]
+        arr[0] = char_map[args.SOS]
+        arr[-1] = char_map[args.EOS]
         for i, c in enumerate(s):
             arr[i + 1] = char_map[c]
         output.append(arr)
     return np.array(output)
 
-dev = np.load('dev_transcripts.npy')
-train = np.load('train_transcripts.npy')
-trans = np.concatenate((dev, train))
 
-count = dict()
-for s in trans:
-    for c in s:
-        if c not in count:
-            count[c] = 0
-        count[c] += 1
 
-stat = list(count.items())
-stat.sort(key=lambda x: x[0])
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--start', '-s', dest='SOS', type=str, default='%')
+    parser.add_argument('--end', '-e', dest='EOS', type=str, default='%')
+    args = parser.parse_args()
+    print(args)
 
-# add SOS and EOS
-count[SOS] = count[EOS] = len(trans)
-if EOS != SOS:
-    stat = [(SOS, len(trans))] + stat + [(EOS, len(trans))]
-else:
-    stat = [(SOS, 2*len(trans))] + stat
+    SOS = args.SOS
+    EOS = args.EOS
 
-char_map = dict()
-index_map = []
-for i, (key, _) in enumerate(stat):
-    char_map[key] = i
-    index_map.append(key)
+    dev = np.load('dev_transcripts.npy')
+    train = np.load('train_transcripts.npy')
+    trans = np.concatenate((dev, train))
 
-print(char_map)
-print(index_map)
+    count = dict()
+    for s in trans:
+        for c in s:
+            if c not in count:
+                count[c] = 0
+            count[c] += 1
 
-dev_encode = encode(dev, char_map)
-train_encode = encode(train, char_map)
+    stat = list(count.items())
+    stat.sort(key=lambda x: x[0])
 
-np.save('dev_encode.npy', dev_encode)
-np.save('train_encode.npy', train_encode)
+    # add SOS and EOS
+    count[SOS] = count[EOS] = len(trans)
+    if EOS != SOS:
+        stat = [(SOS, len(trans))] + stat + [(EOS, len(trans))]
+    else:
+        stat = [(SOS, 2 * len(trans))] + stat
 
-stat_encode = np.array([[char_map[k], v] for k, v in stat])
-np.save('stat_encode.npy', stat_encode)
+    char_map = dict()
+    index_map = []
+    for i, (key, _) in enumerate(stat):
+        char_map[key] = i
+        index_map.append(key)
+
+    print(char_map)
+    print(index_map)
+
+    dev_encode = encode(args, dev, char_map)
+    train_encode = encode(args, train, char_map)
+
+    np.save('dev_encode.npy', dev_encode)
+    np.save('train_encode.npy', train_encode)
+
+    stat_encode = np.array([[char_map[k], v] for k, v in stat])
+    np.save('stat_encode.npy', stat_encode)
+
+
+
+if __name__ == '__main__':
+    main()
