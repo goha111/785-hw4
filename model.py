@@ -14,6 +14,8 @@ def initializer(m):
             param.data.zero_()
         elif param.dim() == 1:
             nn.init.xavier_uniform(param.data)
+        else:
+            nn.init.xavier_uniform(param.data)
 
 def sample_gumbel(shape, eps=1e-10, out=None):
     """
@@ -198,7 +200,7 @@ class Speller(nn.Module):
             self.inith.append(nn.Parameter(torch.zeros(1, hidden_size)))
             self.initc.append(nn.Parameter(torch.zeros(1, hidden_size)))
 
-        activation = nn.ReLU()
+        activation = nn.ELU()
         # map hidden states to queries
         self.query_net = MLP([
             nn.Linear(hidden_size, hidden_size),
@@ -239,16 +241,16 @@ class Speller(nn.Module):
 
         # (N, L, Q) @ (N, Q, 1) -> (N, L, 1) -> (N, 1, L) -> softmax along L -> (N, 1, L)
         attention = F.softmax(torch.bmm(key, query).transpose(1, 2), dim=2)
-        attention_mask = attention.data.new(N, L)
+        attention_mask = attention.data.new(N, L).zero_()
         for i, seq_len in enumerate(seq_lens):
-            attention_mask[i, :seq_len] = 1
+            attention_mask[i, :seq_len] = 1.
         attention_mask = Variable(attention_mask).unsqueeze(1)   # (N, L) -> (N, 1, L)
-        attention = (attention * attention_mask).clamp(min=1e-6)   # multiplied by mask  (N, 1, L) and make it num stable
+        attention = (attention * attention_mask).clamp(min=1e-9)   # multiplied by mask (N, 1, L) and make it num stable
         attention_sum = attention.sum(dim=2, keepdim=True)    # (N, 1, 1) and it will auto broadcast
         attention = attention / attention_sum
 
         # (N, 1, L) @ (N, L, V) -> (N, 1, V) -> (N, V)
-        context = torch.bmm(attention, value).view(attention.shape[0], -1)
+        context = torch.bmm(attention, value).view(N, -1)
         return context
 
     # seqs(h): (L, N, C)

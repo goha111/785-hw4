@@ -40,7 +40,7 @@ def routine(args, model, loader, optimizer, criterion, epoch, train=True):
         seq_len = seq_len.numpy()   # for pack_padded_sequence
         logits = model(seq, seq_len, label_in).transpose(0, 1).contiguous() # (T, N, char_size) -> (N, T, char_size)
         loss_raw = criterion(logits, label_out)   # (N, T)
-        loss = (loss_raw * label_mask).clamp(min=1e-6).sum(dim=1).mean()   # use clamp to make the dot product num_stable
+        loss = (loss_raw * label_mask).clamp(min=1e-9).sum(dim=1).mean()   # use clamp to make the dot product num_stable
 
         # update metrics
         losses.update(loss.data.cpu()[0], args.batch_size)
