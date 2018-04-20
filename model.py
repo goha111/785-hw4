@@ -1,4 +1,3 @@
-import argparse
 import numpy as np
 import torch
 import torch.nn as nn
@@ -132,7 +131,7 @@ class SequencePooling(nn.Module):
             seqs = seqs[:-1]     # remove the last frame
         # (L, N, C) -> (N, L, C) -> (N, L/2, C*2) -> (L/2, N, C*2)
         seqs = seqs.transpose(0, 1).contiguous().view(N, L // 2, C * 2).transpose(0, 1).contiguous()
-        seq_lens = max(seq_lens // 2, 1)    # seq_len should be at least 1
+        seq_lens = np.clip(seq_lens // 2, a_min=1, a_max=None)
         return seqs, seq_lens
 
 class PBLSTM(nn.Module):
