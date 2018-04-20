@@ -106,7 +106,7 @@ class DataLoader():
         return self.len
 
 class MLLSTMCell(nn.Module):
-    def __init__(self, input_size, hidden_size, num_layers, dropout=0.):
+    def __init__(self, input_size, hidden_size, num_layers, dropout=.0):
         super().__init__()
         self.lstm_layers = nn.ModuleList()
         self.dropout = nn.Dropout(dropout)
@@ -178,6 +178,7 @@ class Listener(nn.Module):
     def __init__(self, input_size=40, hidden_size=256):
         super().__init__()
         self.blstms = nn.ModuleList([
+            # TODO: batchNorm1d at the beginning
             VLSTM(input_size=input_size, hidden_size=hidden_size, bidirectional=True),
             PBLSTM(input_size=hidden_size*2, hidden_size=hidden_size),
             PBLSTM(input_size=hidden_size*2, hidden_size=hidden_size),
@@ -198,7 +199,7 @@ class Speller(nn.Module):
         self.embedding = nn.Embedding(char_dict_size, hidden_size)
         self.inith = nn.ParameterList()
         self.initc = nn.ParameterList()
-        self.rnns = MLLSTMCell(input_size=hidden_size*2, hidden_size=hidden_size, num_layers=3)
+        self.rnns = MLLSTMCell(input_size=hidden_size*2, hidden_size=hidden_size, num_layers=3, dropout=.2)
         for i in range(3):
             self.inith.append(nn.Parameter(torch.zeros(1, hidden_size)))
             self.initc.append(nn.Parameter(torch.zeros(1, hidden_size)))

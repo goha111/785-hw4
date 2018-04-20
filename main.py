@@ -72,7 +72,7 @@ def main(args):
         model = torch.load(args.model)
     else:
         model = LASModel(char_dict_size=CHAR_SIZE, projection_bias=projection_bias)
-    optimizer = torch.optim.Adam(model.parameters())
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-5)
     criterion = CrossEntropyLoss3D(reduce=False)
 
     if CUDA_AVAILABLE:
@@ -97,6 +97,7 @@ if __name__ == '__main__':
     parser.add_argument('--model', '-m', dest='model', type=str, default=None)
     parser.add_argument('--print-freq', dest='print_freq', type=int, default=10)
     parser.add_argument('--epoch', dest='epoch', type=int, default=30)
+    parser.add_argument('--lr', dest='lr', type=float, default=1e-3)
     parser.add_argument('--save-dir', dest='save_dir', type=str, default='models')
     args = parser.parse_args()
     print(args)
