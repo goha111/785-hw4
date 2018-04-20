@@ -1,3 +1,5 @@
+from char_list import *
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -187,7 +189,7 @@ class Listener(nn.Module):
         return seqs, seq_lens
 
 class Speller(nn.Module):
-    def __init__(self, char_dict_size=34, input_size=512, hidden_size=256, query_size=128):
+    def __init__(self, char_dict_size=33, input_size=512, hidden_size=256, query_size=128):
         super().__init__()
         self.char_dict_size = char_dict_size
         self.input_size = input_size
@@ -284,10 +286,10 @@ class Speller(nn.Module):
         return torch.stack(output)
 
 class LASModel(nn.Module):
-    def __init__(self, projection_bias=None):
+    def __init__(self, char_dict_size, projection_bias=None):
         super().__init__()
         self.listener = Listener()
-        self.speller = Speller()
+        self.speller = Speller(char_dict_size=char_dict_size)
         self.apply(initializer)
         if projection_bias is not None:
             self.speller.apply_projection_bias(projection_bias)

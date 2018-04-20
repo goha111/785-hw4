@@ -71,7 +71,7 @@ def main(args):
         print('loading model: {}'.format(args.model))
         model = torch.load(args.model)
     else:
-        model = LASModel(projection_bias=projection_bias)
+        model = LASModel(char_dict_size=CHAR_SIZE, projection_bias=projection_bias)
     optimizer = torch.optim.Adam(model.parameters())
     criterion = CrossEntropyLoss3D(reduce=False)
 
