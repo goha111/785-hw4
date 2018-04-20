@@ -35,8 +35,8 @@ class CrossEntropyLoss3D(nn.CrossEntropyLoss):
     # input (N, L, C)
     # target(N, L)
     def forward(self, input, target):
-        assert(input.shape[0] == target.shape[0])
-        return super().forward(input.view(-1, input.shape[2]), target.view(-1))
+        N, L, _ = input.shape
+        return super().forward(input.view(-1, input.shape[2]), target.view(-1)).view(N, L)
 
 class DataLoader():
     def __init__(self, x, y, batch_size=16):
@@ -86,6 +86,9 @@ class DataLoader():
             # lable_length: (n,)
             # label_in_padded, label_out_padded, label_mask: (n, max_label_len)
             yield (seq_padded, seq_lengths, label_in_padded, label_out_padded, label_lengths, label_mask)
+
+    def __len__(self):
+        return self.len
 
 class MLLSTMCell(nn.Module):
     def __init__(self, input_size, hidden_size, num_layers):
@@ -138,22 +141,20 @@ class PBLSTM(nn.Module):
         seqs, seq_lens = self.blstm(seqs, seq_lens)
         return seqs, seq_lens
 
-class MLP(nn.Module):
+class MLP(nn.ModuleList):
     def __init__(self, layers, activation=None):
         super().__init__()
-        self.layers = nn.ModuleList(layers)
-        if activation:
-            self.activation = activation
-        else:
-            self.activation = nn.ReLU()
+        if activation is None:
+            activation = nn.ReLU()
+        for i, layer in enumerate(layers):
+            self.append(layer)
+            if i != len(layers) - 1:
+                self.append(activation)
 
     def forward(self, input):
         h = input
-        for i, module in enumerate(self.layers):
-            if i == len(self.layers) - 1:
+        for module in self:
                 h = module(h)
-            else:
-                h = self.activation(module(h))
         return h
 
 class Listener(nn.Module):
@@ -172,7 +173,7 @@ class Listener(nn.Module):
         return seqs, seq_lens
 
 class Speller(nn.Module):
-    def __init__(self, char_dict_size=34, input_size=512, hidden_size=256, query_size=64, projection_bias=None):
+    def __init__(self, char_dict_size=34, input_size=512, hidden_size=256, query_size=64):
         super().__init__()
         self.char_dict_size = char_dict_size
         self.input_size = input_size
@@ -205,13 +206,16 @@ class Speller(nn.Module):
             nn.Linear(hidden_size, hidden_size)
         ], self.elu)
 
-        self.output_layer = nn.Linear(hidden_size*2, char_dict_size)
-        if projection_bias is not None:
-            self.output_layer.bias.data = projection_bias
+        self.output_layer = MLP([
+            nn.Linear(hidden_size * 2, hidden_size),
+            nn.Linear(hidden_size, char_dict_size)
+        ])
 
         # weight tying
-        self.output_layer.weight= self.embedding.weight
+        self.output_layer[-1].weight= self.embedding.weight
 
+    def apply_projection_bias(self, projection_bias):
+        self.output_layer[-1].bias.data = projection_bias
     # query:    (N, Q, 1)
     # key:      (N, L, Q)
     # value:    (N, L, V)
@@ -238,38 +242,44 @@ class Speller(nn.Module):
 
     # seqs(h): (Lmax, N, C)
     # seq_lens: (N)
-    # label(y): (N, T)
-    # label_lens: (N)
-    def forward(self, seqs, seq_lens, labels, label_lens):
-        N, T = labels.shape
+    # label_in(y): (N, T)
+    def forward(self, seqs, seq_lens, label_in):
+        N, T = label_in.shape
         # expand initial states of LSTMCell to batch size
         hidden = [tensor.repeat(N, 1) for tensor in self.inith]
         cell = [tensor.repeat(N, 1) for tensor in self.initc]
-        output = torch.zeros((T, N, self.char_dict_size))
-        char_input = self.embedding(labels)     # (max_trans_len, N, E)
+        output = []
+        char_input = self.embedding(label_in)     # (N, max_trans_len, E)
         key = self.key_net(seqs).transpose(0, 1)        # (L, N, input_size) -> (L, N, Q) -> (N, L, Q)
         value = self.value_net(seqs).transpose(0, 1)    # (L, N, input_size) -> (L, N, V) -> (N, L, V)
         query = self.query_net(hidden[-1]).unsqueeze(-1)    # (N, hidden_size) -> (N, Q) -> (N, Q, 1)
         prev_context = self.attention_context(query, key, value, seq_lens)    # (N, V)
+
+        # 1. do LSTM with prev context and prev states
+        # 2. get query with new hidden states
+        # 3. get current context
+        # 4. concatenate current context with current hidden state and then feed into output_network
         for t in range(T):
             # (N, E) concat (N, V) -> (N, E+V)
             # TODO: sample from prev prediction with some probability
-            rnn_input = torch.cat((prev_context, char_input[t]), dim=1)
+            rnn_input = torch.cat((prev_context, char_input[:,t,:]), dim=1)
             hidden, cell = self.rnns(rnn_input, hidden, cell)
-            query = self.query_net(hidden[-1]).unsqueeze(-1)
-            curr_context = self.attention_context(query, key, value)
-            output[t,:,:] = self.output_layer(torch.cat((curr_context, hidden)))
+            query = self.query_net(hidden[-1]).unsqueeze(-1)    # calculate current query
+            curr_context = self.attention_context(query, key, value, seq_lens)   # calculate current context
+            output.append(self.output_layer(torch.cat((curr_context, hidden[-1]), dim=1)))
             prev_context = curr_context
-        return output
+        return torch.stack(output)
 
 class LASModel(nn.Module):
     def __init__(self, projection_bias=None):
         super().__init__()
         self.listener = Listener()
-        self.speller = Speller(projection_bias=projection_bias)
+        self.speller = Speller()
         self.apply(initializer)
+        if projection_bias is not None:
+            self.speller.apply_projection_bias(projection_bias)
 
-    def forward(self, seqs, seq_lens, labels, label_lens):
+    def forward(self, seqs, seq_lens, label_in):
         h, h_len = self.listener(seqs, seq_lens)
-        output = self.speller(h, h_len, labels, label_lens)
+        output = self.speller(h, h_len, label_in)
         return output

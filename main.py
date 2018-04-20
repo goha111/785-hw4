@@ -2,6 +2,7 @@ from model import *
 from char_list import *
 
 import argparse
+import os
 import time
 import numpy as np
 import torch
@@ -38,17 +39,31 @@ def routine(args, model, loader, optimizer, criterion, epoch, train=True):
         seq, seq_len, label_in, label_out, label_len, label_mask = to_cuda(*data)
         seq_len = seq_len.data.cpu().numpy()   # for pack_padded_sequence
         label_in = label_in.long()
-        logits = model(seq, seq_len, label_in, label_len)
+        label_out = label_out.long()
+        logits = model(seq, seq_len, label_in).transpose(0, 1).contiguous() # (T, N, char_size) -> (N, T, char_size)
+        loss_raw = criterion(logits, label_out)   # (N, T)
+        loss = (loss_raw * label_mask).sum(dim=1).mean()
 
-    if train:
-        optimizer.zero_grad()
-        # loss.backward()
-        optimizer.step()
-    return logits
+        # update metrics
+        losses.update(loss.data.cpu()[0], args.batch_size)
 
+        if train:
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+        if i % args.print_freq == 0:
+            running_time = time.time() - start
+            start = time.time()
+            print('Epoch: [{0}][{1}/{2}]\t'
+                  'Loss: {loss.val:.4f} ({loss.avg:.4f})\t'
+                  'time: {time:.4f}'.format(epoch, i, len(loader), loss=losses, time=running_time))
+    return losses.avg
 
 def main(args):
-    xtrain, ytrain = load_data('dev')
+    if not os.path.exists(args.save_dir):
+        os.makedirs(args.save_dir)
+    xtrain, ytrain = load_data('train')
     xvalid, yvalid = load_data('dev')
     stat_encode = np.load('stat_encode.npy')
     projection_bias = torch.FloatTensor(unigram_logits(stat_encode))
@@ -66,16 +81,25 @@ def main(args):
         model.cuda()
         criterion.cuda()
 
+    min_loss = 300.
     for epoch in range(args.epoch):
         print('-' * 10 + 'epoch {}: train'.format(epoch) + '-' * 10)
-        loss, _ = routine(args, model, train_loader, optimizer, criterion, epoch, True)
-
+        loss = routine(args, model, train_loader, optimizer, criterion, epoch, True)
+        print('train epoch {}:\tloss={:.4f}'.format(epoch, loss))
+        print('-' * 10 + 'epoch {}: evaluate'.format(epoch) + '-' * 10)
+        loss = routine(args, model, valid_loader, optimizer, criterion, epoch, False)
+        print('valid epoch {}:\tloss={:.4f}'.format(epoch, loss))
+        if loss < min_loss:
+            torch.save(model, '{}/{:.4f}.pt'.format(args.save_dir, loss))
+        min_loss = min(loss, min_loss)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--batch-size', '-b', type=int, default=16)
-    parser.add_argument('--model', '-m', type=str, default=None)
-    parser.add_argument('--print-freq', type=int, default=10)
-    parser.add_argument('--epoch', type=int, default=30)
+    parser.add_argument('--batch-size', '-b', dest='batch_size', type=int, default=16)
+    parser.add_argument('--model', '-m', dest='model', type=str, default=None)
+    parser.add_argument('--print-freq', dest='print_freq', type=int, default=10)
+    parser.add_argument('--epoch', dest='epoch', type=int, default=30)
+    parser.add_argument('--save-dir', dest='save_dir', type=str, default='models')
     args = parser.parse_args()
+    print(args)
     main(args)
