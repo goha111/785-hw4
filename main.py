@@ -37,10 +37,10 @@ def routine(args, model, loader, optimizer, criterion, epoch, train=True):
     start = time.time()
     for i, (seq, seq_len, label_in, label_out, label_mask) in enumerate(loader):
         seq, label_in, label_out, label_mask = to_cuda(seq, label_in, label_out, label_mask)
-        # seq_len = seq_len.numpy()   # for pack_padded_sequence
+        seq_len = seq_len.numpy()   # for pack_padded_sequence
         logits = model(seq, seq_len, label_in).transpose(0, 1).contiguous() # (T, N, char_size) -> (N, T, char_size)
         loss_raw = criterion(logits, label_out)   # (N, T)
-        loss = (loss_raw * label_mask).sum(dim=1).mean()
+        loss = (loss_raw * label_mask).clamp(min=1e-9).sum(dim=1).mean()   # use clamp to make the dot product num_stable
 
         # update metrics
         losses.update(loss.data.cpu()[0], args.batch_size)

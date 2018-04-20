@@ -59,7 +59,7 @@ class DataLoader():
             idx = self.perm_idx[i:i + self.batch_size]
             seqs, labels = self.x[idx], self.y[idx]
             seq_lengths = torch.IntTensor(list(map(lambda x: x.shape[0], seqs)))
-            # because transcripts contains SOS and EOS already
+            # because transcript contains SOS and EOS already
             label_lengths = torch.IntTensor(list(map(lambda x: x.shape[0], labels))) - 1
             max_seq_len = seq_lengths.max()
             max_label_len = label_lengths.max()
@@ -78,7 +78,7 @@ class DataLoader():
 
             # sort tensors by lengths
             seq_lengths, perm_idx = seq_lengths.sort(0, descending=True)
-            seq_padded = to_variable(seq_padded[perm_idx]).transpose(0, 1).contiguous()
+            seq_padded = to_variable(seq_padded[perm_idx]).float().transpose(0, 1).contiguous()
             label_in_padded = to_variable(label_in_padded[perm_idx]).long()
             label_out_padded = to_variable(label_out_padded[perm_idx]).long()
             label_mask = to_variable(label_mask[perm_idx]).float()
@@ -117,19 +117,22 @@ class VLSTM(nn.Module):
         batch_size = seqs.shape[1]
         h_0 = self.h_0.expand(-1, batch_size, -1).contiguous()
         c_0 = self.c_0.expand(-1, batch_size, -1).contiguous()
-        h = pack_padded_sequence(seqs, seq_lens)
-        h, _ = self.lstm(h, (h_0, c_0))
-        seqs, _ = pad_packed_sequence(h)
+        input = pack_padded_sequence(seqs, seq_lens)
+        output, _ = self.lstm(input, (h_0, c_0))
+        seqs, _ = pad_packed_sequence(output)
         return seqs, seq_lens
 
 class SequencePooling(nn.Module):
+
+    # seqs: (L, N, C)
+    # seq_lens (N, )
     def forward(self, seqs, seq_lens):
-        if seqs.shape[0] % 2 == 1:  # odd number of timestamps
-            seqs = seqs[:-1]        # remove the last frame
         L, N, C = seqs.shape
+        if L % 2 == 1:      # odd number of timestamps
+            seqs = seqs[:-1]     # remove the last frame
         # (L, N, C) -> (N, L, C) -> (N, L/2, C*2) -> (L/2, N, C*2)
         seqs = seqs.transpose(0, 1).contiguous().view(N, L // 2, C * 2).transpose(0, 1).contiguous()
-        seq_lens = seq_lens // 2
+        seq_lens = max(seq_lens // 2, 1)    # seq_len should be at least 1
         return seqs, seq_lens
 
 class PBLSTM(nn.Module):
@@ -168,12 +171,12 @@ class Listener(nn.Module):
         ])
 
     def forward(self, seqs, seq_lens):
-        for module in self.blstms:
-            seqs, seq_lens = module(seqs, seq_lens)
+        for lstm in self.blstms:
+            seqs, seq_lens = lstm(seqs, seq_lens)
         return seqs, seq_lens
 
 class Speller(nn.Module):
-    def __init__(self, char_dict_size=34, input_size=512, hidden_size=256, query_size=64):
+    def __init__(self, char_dict_size=34, input_size=512, hidden_size=256, query_size=128):
         super().__init__()
         self.char_dict_size = char_dict_size
         self.input_size = input_size
@@ -182,11 +185,11 @@ class Speller(nn.Module):
         self.inith = nn.ParameterList()
         self.initc = nn.ParameterList()
         self.rnns = MLLSTMCell(input_size=hidden_size*2, hidden_size=hidden_size, num_layers=3)
-        activation = nn.ReLU()
         for i in range(3):
             self.inith.append(nn.Parameter(torch.zeros(1, hidden_size)))
             self.initc.append(nn.Parameter(torch.zeros(1, hidden_size)))
 
+        activation = nn.ReLU()
         # map hidden states to queries
         self.query_net = MLP([
             nn.Linear(hidden_size, hidden_size),
@@ -206,7 +209,7 @@ class Speller(nn.Module):
         ], activation)
 
         self.output_layer = MLP([
-            nn.Linear(hidden_size * 2, hidden_size),
+            nn.Linear(hidden_size*2, hidden_size),
             nn.Linear(hidden_size, char_dict_size)
         ])
 
@@ -215,6 +218,7 @@ class Speller(nn.Module):
 
     def apply_projection_bias(self, projection_bias):
         self.output_layer[-1].bias.data = projection_bias
+
     # query:    (N, Q, 1)
     # key:      (N, L, Q)
     # value:    (N, L, V)
@@ -222,8 +226,7 @@ class Speller(nn.Module):
     #
     # return    (N, V)
     def attention_context(self, query, key, value, seq_lens):
-        N = query.shape[0]
-        L = int(seq_lens.max())  # L
+        N, L, _ = key.shape
 
         # (N, L, Q) @ (N, Q, 1) -> (N, L, 1) -> (N, 1, L) -> softmax along L -> (N, 1, L)
         attention = F.softmax(torch.bmm(key, query).transpose(1, 2), dim=2)
@@ -231,7 +234,7 @@ class Speller(nn.Module):
         for i, seq_len in enumerate(seq_lens):
             attention_mask[i, :seq_len] = 1
         attention_mask = Variable(attention_mask).unsqueeze(1)   # (N, L) -> (N, 1, L)
-        attention = attention * attention_mask    # multiplied by mask  (N, 1, L)
+        attention = (attention * attention_mask).clamp(min=0.)   # multiplied by mask  (N, 1, L) and make it num stable
         attention_sum = attention.sum(dim=2, keepdim=True)    # (N, 1, 1) and it will auto broadcast
         attention = attention / attention_sum
 
