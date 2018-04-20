@@ -2,19 +2,17 @@ import argparse
 import numpy as np
 
 
-
 def encode(args, array, char_map):
     output = []
     for s in array:
         arr = np.zeros(len(s) + 2, dtype=int)
         arr[0] = char_map[args.SOS]
+        arr[1: -1] = [char_map[c] for c in s]
         arr[-1] = char_map[args.EOS]
-        for i, c in enumerate(s):
-            arr[i + 1] = char_map[c]
+        # for i, c in enumerate(s):
+        #     arr[i + 1] = char_map[c]
         output.append(arr)
     return np.array(output)
-
-
 
 def main():
     parser = argparse.ArgumentParser()
@@ -64,7 +62,6 @@ def main():
 
     stat_encode = np.array([[char_map[k], v] for k, v in stat])
     np.save('stat_encode.npy', stat_encode)
-
 
 
 if __name__ == '__main__':
