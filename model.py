@@ -139,11 +139,12 @@ class Listener(nn.Module):
         return seqs, seq_lens
 
 class Speller(nn.Module):
-    def __init__(self, char_dict_size=33, input_size=512, hidden_size=256, query_size=128):
+    def __init__(self, char_dict_size=33, input_size=512, hidden_size=256, query_size=128, feed_forward_ratio=.1):
         super().__init__()
         self.char_dict_size = char_dict_size
         self.input_size = input_size
         self.hidden_size = hidden_size
+        self.feed_forward_ratio = feed_forward_ratio
         self.embedding = nn.Embedding(char_dict_size, hidden_size)
         self.rnns = MLLSTMCell(input_size=hidden_size*2, hidden_size=hidden_size, num_layers=3, dropout=.2)
         self.inith = nn.ParameterList()
@@ -203,6 +204,15 @@ class Speller(nn.Module):
         context = torch.bmm(attention, value).view(N, -1)
         return context
 
+    # logit: (N, char_size)
+
+    # output:(N, 1) each is one single number of char_index
+    def sample_output(self, logit):
+        gumbel = Variable(sample_gumbel(shape=logit.size(), out=logit.data.new()))
+        logit = logit + gumbel   # (N, char_size)
+        char_input = logit.max(dim=1, keepdim=True)[1]  # (N, 1)
+        return char_input
+
     # seqs(h): (L, N, C)
     # seq_lens: (N)
     # label_in(y): (N, T)
@@ -226,8 +236,14 @@ class Speller(nn.Module):
         # 4. concatenate current context with current hidden state and then feed into output_network
         for t in range(T):
             # (N, E) concat (N, V) -> (N, E+V)
-            # TODO: sample from prev prediction with some probability
-            rnn_input = torch.cat((prev_context, label_in[:,t,:]), dim=1)
+            rand_num = np.random.rand()
+            if rand_num < self.feed_forward_ratio and t > 0:  # sample from previous output
+                char_input = self.sample_output(output[-1])   # (N, 1)
+                embedded = self.embedding(char_input)   # (N, 1, E)
+                char_input = embedded.view(N, -1)  #(N, E)
+            else:
+                char_input = label_in[:,t,:]
+            rnn_input = torch.cat((prev_context, char_input), dim=1)
             hidden, cell = self.rnns(rnn_input, hidden, cell)
             query = self.query_net(hidden[-1]).unsqueeze(-1)    # calculate current query
             curr_context = self.attention_context(query, key, value, seq_lens)   # calculate current context
@@ -258,10 +274,8 @@ class Speller(nn.Module):
             hidden, cell = self.rnns(rnn_input, hidden, cell)
             query = self.query_net(hidden[-1]).unsqueeze(-1)
             curr_context = self.attention_context(query, key, value, seq_lens)  # calculate current context
-            out = self.output_layer(torch.cat((curr_context, hidden[-1]), dim=1))  # (1, char_size)
-            gumbel = Variable(sample_gumbel(shape=out.size(), out=out.data.new()))
-            out = out + gumbel
-            label_in = out.max(dim=1)[1].unsqueeze(-1)  # (1, ) -> (1, 1)
+            logit = self.output_layer(torch.cat((curr_context, hidden[-1]), dim=1))  # (1, char_size)
+            label_in = self.sample_output(logit)  # (1, 1)
             output.append(label_in)
             if label_in.data[0][0] == EOS_IDX:
                 break
