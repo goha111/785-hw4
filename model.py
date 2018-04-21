@@ -291,6 +291,7 @@ class Speller(nn.Module):
         return torch.cat(output, dim=1)[0]
 
 class LASModel(nn.Module):
+    dump_patches = True
     def __init__(self, projection_bias=None):
         super().__init__()
         self.listener = Listener()
