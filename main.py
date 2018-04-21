@@ -38,9 +38,9 @@ def routine(args, model, loader, optimizer, criterion, epoch, train=True):
     for i, (seq, seq_len, label_in, label_out, label_mask) in enumerate(loader):
         seq, label_in, label_out, label_mask = to_cuda(seq, label_in, label_out, label_mask)
         seq_len = seq_len.numpy()   # for pack_padded_sequence
-        logits = model(seq, seq_len, label_in).transpose(0, 1).contiguous() # (T, N, char_size) -> (N, T, char_size)
+        logits = model(seq, seq_len, label_in).transpose(0, 1).contiguous()  # (T, N, char_size) -> (N, T, char_size)
         loss_raw = criterion(logits, label_out)   # (N, T)
-        loss = (loss_raw * label_mask).clamp(min=1e-9).sum(dim=1).mean()   # use clamp to make the dot product num_stable
+        loss = (loss_raw * label_mask).clamp(min=1e-9).sum(dim=1).mean()   # use clamp to make dot product num_stable
 
         # update metrics
         losses.update(loss.data.cpu()[0], args.batch_size)
@@ -72,6 +72,7 @@ def main(args):
         model = torch.load(args.model)
     else:
         model = LASModel(char_dict_size=CHAR_SIZE, projection_bias=projection_bias)
+        model.float()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-5)
     criterion = CrossEntropyLoss3D(reduce=False)
 
@@ -88,6 +89,7 @@ def main(args):
         loss = routine(args, model, valid_loader, optimizer, criterion, epoch, False)
         print('valid epoch {}:\tloss={:.4f}'.format(epoch, loss))
         if loss < min_loss:
+            print('Saving new model to: {}/{:.4f}.pt'.format(args.save_dir, loss))
             torch.save(model, '{}/{:.4f}.pt'.format(args.save_dir, loss))
         min_loss = min(loss, min_loss)
 
