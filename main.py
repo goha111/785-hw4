@@ -80,7 +80,7 @@ def main(args):
         model.cuda()
         criterion.cuda()
 
-    min_loss = 300.
+    min_loss = 50.
     for epoch in range(args.epoch):
         print('-' * 10 + 'epoch {}: train'.format(epoch) + '-' * 10)
         loss = routine(args, model, train_loader, optimizer, criterion, epoch, True)

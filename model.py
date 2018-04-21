@@ -315,7 +315,7 @@ class Speller(nn.Module):
             out = out + gumbel
             label_in = out.max(dim=1)[1].unsqueeze(-1)  # (1, ) -> (1, 1)
             output.append(label_in)
-            if label_in.data[0][0] == EOS:
+            if DECODE_MAP[label_in.data[0][0]] == EOS:
                 break
             else:
                 prev_context = curr_context
@@ -330,7 +330,10 @@ class LASModel(nn.Module):
         if projection_bias is not None:
             self.speller.apply_projection_bias(projection_bias)
 
-    def forward(self, seqs, seq_lens, label_in):
+    def forward(self, seqs, seq_lens, label_in, predict=False):
         h, h_len = self.listener(seqs, seq_lens)
-        output = self.speller(h, h_len, label_in)
+        if predict:
+            output = self.speller.predict(h, h_len, label_in)
+        else:
+            output = self.speller(h, h_len, label_in)
         return output
