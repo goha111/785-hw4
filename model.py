@@ -247,7 +247,7 @@ class Speller(nn.Module):
             hidden, cell = self.rnns(rnn_input, hidden, cell)
             query = self.query_net(hidden[-1]).unsqueeze(-1)    # calculate current query
             curr_context = self.attention_context(query, key, value, seq_lens)   # calculate current context
-            output.append(self.output_layer(torch.cat((curr_context, hidden[-1]), dim=1)))
+            output.append(self.output_layer(torch.cat((curr_context, query), dim=1)))
             prev_context = curr_context
         return torch.stack(output)
 
@@ -274,7 +274,7 @@ class Speller(nn.Module):
             hidden, cell = self.rnns(rnn_input, hidden, cell)
             query = self.query_net(hidden[-1]).unsqueeze(-1)
             curr_context = self.attention_context(query, key, value, seq_lens)  # calculate current context
-            logit = self.output_layer(torch.cat((curr_context, hidden[-1]), dim=1))  # (1, char_size)
+            logit = self.output_layer(torch.cat((curr_context, query), dim=1))  # (1, char_size)
             label_in = self.sample_output(logit)  # (1, 1)
             output.append(label_in)
             if label_in.data[0][0] == EOS_IDX:
