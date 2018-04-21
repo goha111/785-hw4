@@ -239,7 +239,7 @@ class Speller(nn.Module):
     # seq_lens: (N)
     # label_in(y): (N, T)
 
-    #output: (1， len_sentence)
+    #output: (len_sentence)
     def predict(self, seqs, seq_lens, label_in):
         N, T = label_in.shape
         assert(N == T == 1)   #  one batch, one input, which is SOS
@@ -267,7 +267,7 @@ class Speller(nn.Module):
                 break
             else:
                 prev_context = curr_context
-        return torch.cat(output, dim=1)
+        return torch.cat(output, dim=1)[0]
 
 class LASModel(nn.Module):
     def __init__(self, char_dict_size, projection_bias=None):

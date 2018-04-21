@@ -6,15 +6,20 @@ import argparse
 import os
 import time
 import numpy as np
+import pandas as pd
 import torch
 
 CUDA_AVAILABLE = torch.cuda.is_available()
-print('Using CUDA: {}'.format(CUDA_AVAILABLE))
+
+def decode(seq):
+    return ''.join([DECODE_MAP[c] for c in seq[1:-1]])
 
 
 def to_cuda(*tensors):
     if CUDA_AVAILABLE:
-        return tuple(tensor.cuda() for tensor in tensors)
+        tensors = tuple(tensor.cuda() for tensor in tensors)
+    if len(tensors) == 1:
+        return tensors[0]
     else:
         return tensors
 
@@ -38,7 +43,6 @@ def routine(args, model, loader, optimizer, criterion, epoch, train=True):
     start = time.time()
     for i, (seq, seq_len, label_in, label_out, label_mask) in enumerate(loader):
         seq, label_in, label_out, label_mask = to_cuda(seq, label_in, label_out, label_mask)
-        seq_len = seq_len.numpy()   # for pack_padded_sequence
         logits = model(seq, seq_len, label_in).transpose(0, 1).contiguous()  # (T, N, char_size) -> (N, T, char_size)
         loss_raw = criterion(logits, label_out)   # (N, T)
         loss = (loss_raw * label_mask).clamp(min=1e-9).sum(dim=1).mean()   # use clamp to make dot product num_stable
@@ -60,9 +64,10 @@ def routine(args, model, loader, optimizer, criterion, epoch, train=True):
     return losses.avg
 
 def train(args):
+    print('Train mode')
     if not os.path.exists(args.save_dir):
         os.makedirs(args.save_dir)
-    xtrain, ytrain = load_data('dev')
+    xtrain, ytrain = load_data('train')
     xvalid, yvalid = load_data('dev')
     stat_encode = np.load('stat_encode.npy')
     projection_bias = torch.FloatTensor(unigram_logits(stat_encode))
@@ -70,7 +75,7 @@ def train(args):
     valid_loader = DataLoader(xvalid, yvalid, batch_size=args.batch_size)
     if args.model:
         print('loading model: {}'.format(args.model))
-        model = torch.load(args.model)
+        model = torch.load(args.model, map_location=lambda storage, loc: storage)
     else:
         model = LASModel(char_dict_size=CHAR_SIZE, projection_bias=projection_bias)
         model.float()
@@ -94,8 +99,51 @@ def train(args):
             torch.save(model, '{}/{:.4f}.pt'.format(args.save_dir, loss))
         min_loss = min(loss, min_loss)
 
+def generate_sequence(model, seq, seq_len, num_seq=10):
+    result = []
+    label_in = Variable(seq.data.new([[SOS_IDX]]).long())
+    for _ in range(num_seq):
+        out = model(seq, seq_len, label_in, predict=True)
+        result.append(out.data.cpu().numpy())
+    return np.array(result)
+
 def test(args):
-    pass
+    print('Test mode')
+    xtest = np.load('test.npy')
+    test_loader = TestLoader(xtest)
+    print('loading model: {}'.format(args.model))
+    model = torch.load(args.model, map_location=lambda storage, loc: storage).eval()
+    criterion = CrossEntropyLoss3D(reduce=False)
+    if CUDA_AVAILABLE:
+        model.cuda()
+        criterion.cuda()
+
+    result = []
+    for i, (seq, seq_len) in enumerate(test_loader):
+        seq = to_cuda(seq)
+        candidate = generate_sequence(model, seq, seq_len, args.num_seq)
+        # (L, 1, T) ->(L, N, T) -> (N, L, T)
+        seq = seq.data.expand(-1, args.num_seq, -1).transpose(0, 1).cpu().numpy()
+        eval_loader = DataLoader(seq, candidate, batch_size=args.num_seq, random=False)
+        seq, seq_len, label_in, label_out, label_mask = next(eval_loader.__iter__())
+        seq, label_in, label_out, label_mask = to_cuda(seq, label_in, label_out, label_mask)
+        logits = model(seq, seq_len, label_in).transpose(0, 1).contiguous()  # (T, N, char_size) -> (N, T, char_size)
+        loss_raw = criterion(logits, label_out)  # (N, T)
+        losses = (loss_raw * label_mask).clamp(min=1e-9).sum(dim=1).data.cpu().numpy()
+        loss, idx = losses.min(), losses.argmin()
+        decoded = decode(candidate[idx])
+        if args.verbose:
+            print('seq: {}\tloss: {:.4f}\nstr: {}\n'.format(i, loss, decoded))
+        result.append(decoded)
+
+    y = np.array([np.arange(len(result)), result]).T
+    df = pd.DataFrame(y, columns=['Id', 'Predicted'])
+    if not os.path.exists(args.test_dir):
+        os.makedirs(args.test_dir)
+    filename = args.model.split('/')[1][:-3]
+    path = os.path.join(args.test_dir, filename)
+    print('Save result to: {}'.format(path))
+    df.to_csv(path, index=False)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -105,8 +153,18 @@ if __name__ == '__main__':
     parser.add_argument('--epoch', dest='epoch', type=int, default=30)
     parser.add_argument('--lr', dest='lr', type=float, default=1e-3)
     parser.add_argument('--save-dir', dest='save_dir', type=str, default='models')
+    parser.add_argument('--no-cuda', dest='cuda', action='store_false', default=True)
+
+    # for testing
     parser.add_argument('--test', dest='test', action='store_true', default=False)
+    parser.add_argument('--num-seq', dest='num_seq', type=int, default=10)
+    parser.add_argument('--test-dir', dest='test_dir', type=str, default='result')
+    parser.add_argument('--verbose', '-v', dest='verbose', action='store_true', default=False)
     args = parser.parse_args()
+
+    CUDA_AVAILABLE = torch.cuda.is_available() and args.cuda
+    print('Using CUDA: {}'.format(CUDA_AVAILABLE))
+
     print(args)
 
     if (args.test):
