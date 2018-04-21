@@ -315,7 +315,7 @@ class Speller(nn.Module):
             out = out + gumbel
             label_in = out.max(dim=1)[1].unsqueeze(-1)  # (1, ) -> (1, 1)
             output.append(label_in)
-            if DECODE_MAP[label_in.data[0][0]] == EOS:
+            if label_in.data[0][0] == EOS_IDX:
                 break
             else:
                 prev_context = curr_context

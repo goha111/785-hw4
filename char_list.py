@@ -5,3 +5,6 @@ assert(len(ENCODE_MAP) == len(DECODE_MAP))
 CHAR_SIZE = len(ENCODE_MAP)
 SOS = '%'
 EOS = '%'
+
+SOS_IDX = ENCODE_MAP[SOS]
+EOS_IDX = ENCODE_MAP[EOS]
