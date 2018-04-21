@@ -14,7 +14,6 @@ CUDA_AVAILABLE = torch.cuda.is_available()
 def decode(seq):
     return ''.join([DECODE_MAP[c] for c in seq[1:-1]])
 
-
 def to_cuda(*tensors):
     if CUDA_AVAILABLE:
         tensors = tuple(tensor.cuda() for tensor in tensors)
@@ -119,8 +118,10 @@ def test(args):
         criterion.cuda()
 
     result = []
+    total_loss = 0.
     for i, (seq, seq_len) in enumerate(test_loader):
         seq = to_cuda(seq)
+        start = time.time()
         candidate = generate_sequence(model, seq, seq_len, args.num_seq)
         # (L, 1, T) ->(L, N, T) -> (N, L, T)
         seq = seq.data.expand(-1, args.num_seq, -1).transpose(0, 1).cpu().numpy()
@@ -131,11 +132,15 @@ def test(args):
         loss_raw = criterion(logits, label_out)  # (N, T)
         losses = (loss_raw * label_mask).clamp(min=1e-9).sum(dim=1).data.cpu().numpy()
         loss, idx = losses.min(), losses.argmin()
+        total_loss += loss
         decoded = decode(candidate[idx])
+        running_time = time.time() - start
         if args.verbose:
-            print('seq: {}\tloss: {:.4f}\nstr: {}\n'.format(i, loss, decoded))
+            print('seq: {}\tloss: {:.4f}\ttime: {:.4f}\n'
+                  'str: {}\n'.format(i, loss, running_time, decoded))
         result.append(decoded)
 
+    print('Average Loss: {:.4f}'.format(total_loss / len(result)))
     y = np.array([np.arange(len(result)), result]).T
     df = pd.DataFrame(y, columns=['Id', 'Predicted'])
     if not os.path.exists(args.test_dir):
