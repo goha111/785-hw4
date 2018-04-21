@@ -86,7 +86,7 @@ def train(args):
         model.cuda()
         criterion.cuda()
 
-    min_loss = 50.
+    min_loss = args.min_loss
     for epoch in range(args.epoch):
         print('-' * 10 + 'epoch {}: train'.format(epoch) + '-' * 10)
         loss = routine(args, model, train_loader, optimizer, criterion, epoch, True)
@@ -154,6 +154,7 @@ if __name__ == '__main__':
     parser.add_argument('--lr', dest='lr', type=float, default=1e-3)
     parser.add_argument('--save-dir', dest='save_dir', type=str, default='models')
     parser.add_argument('--no-cuda', dest='cuda', action='store_false', default=True)
+    parser.add_argument('--min-loss',dest='min_loss', type=float, default=50)
 
     # for testing
     parser.add_argument('--test', dest='test', action='store_true', default=False)
