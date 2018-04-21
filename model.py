@@ -214,7 +214,7 @@ class Speller(nn.Module):
         hidden = [tensor.repeat(N, 1) for tensor in self.inith]
         cell = [Variable(h.data.new(h.shape).zero_()) for h in hidden]
         output = []
-        char_input = self.embedding(label_in)     # (N, max_trans_len, E)
+        label_in = self.embedding(label_in)     # (N, max_trans_len, E)
         key = self.key_net(seqs).transpose(0, 1)        # (L, N, input_size) -> (L, N, Q) -> (N, L, Q)
         value = self.value_net(seqs).transpose(0, 1)    # (L, N, input_size) -> (L, N, V) -> (N, L, V)
         query = self.query_net(hidden[-1]).unsqueeze(-1)    # (N, hidden_size) -> (N, Q) -> (N, Q, 1)
@@ -227,7 +227,7 @@ class Speller(nn.Module):
         for t in range(T):
             # (N, E) concat (N, V) -> (N, E+V)
             # TODO: sample from prev prediction with some probability
-            rnn_input = torch.cat((prev_context, char_input[:,t,:]), dim=1)
+            rnn_input = torch.cat((prev_context, label_in[:,t,:]), dim=1)
             hidden, cell = self.rnns(rnn_input, hidden, cell)
             query = self.query_net(hidden[-1]).unsqueeze(-1)    # calculate current query
             curr_context = self.attention_context(query, key, value, seq_lens)   # calculate current context
@@ -253,8 +253,8 @@ class Speller(nn.Module):
         prev_context = self.attention_context(query, key, value, seq_lens)  # (N, V)
         output.append(label_in)
         while True:
-            char_input = self.embedding(label_in)  # (1, 1, E)
-            rnn_input = torch.cat((prev_context, char_input[:, 0, :]), dim=1)
+            label_in = self.embedding(label_in)  # (1, 1, E)
+            rnn_input = torch.cat((prev_context, label_in[:, 0, :]), dim=1)
             hidden, cell = self.rnns(rnn_input, hidden, cell)
             query = self.query_net(hidden[-1]).unsqueeze(-1)
             curr_context = self.attention_context(query, key, value, seq_lens)  # calculate current context

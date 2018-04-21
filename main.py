@@ -140,7 +140,7 @@ def test(args):
     df = pd.DataFrame(y, columns=['Id', 'Predicted'])
     if not os.path.exists(args.test_dir):
         os.makedirs(args.test_dir)
-    filename = args.model.split('/')[1][:-3]
+    filename = args.model.split('/')[1][:-3] + '.csv'
     path = os.path.join(args.test_dir, filename)
     print('Save result to: {}'.format(path))
     df.to_csv(path, index=False)
