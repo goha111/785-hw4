@@ -85,7 +85,7 @@ def train(args):
         model.cuda()
         criterion.cuda()
 
-    min_loss = args.min_loss
+
     for epoch in range(args.epoch):
         print('-' * 10 + 'epoch {}: train'.format(epoch) + '-' * 10)
         loss = routine(args, model, train_loader, optimizer, criterion, epoch, True)
@@ -93,10 +93,10 @@ def train(args):
         print('-' * 10 + 'epoch {}: evaluate'.format(epoch) + '-' * 10)
         loss = routine(args, model, valid_loader, optimizer, criterion, epoch, False)
         print('valid epoch {}:\tloss={:.4f}'.format(epoch, loss))
-        if loss < min_loss:
-            print('Saving new model to: {}/{:.4f}.pt'.format(args.save_dir, loss))
+        if epoch % args.save_freq == 0:
+            print('Saving new model to: {}/{}_{:.4f}.pt'.format(args.save_dir, epoch, loss))
             torch.save(model, '{}/{:.4f}.pt'.format(args.save_dir, loss))
-        min_loss = min(loss, min_loss)
+
 
 def generate_sequence(model, seq, seq_len, num_seq=10):
     result = []
@@ -160,6 +160,7 @@ if __name__ == '__main__':
     parser.add_argument('--save-dir', dest='save_dir', type=str, default='models')
     parser.add_argument('--no-cuda', dest='cuda', action='store_false', default=True)
     parser.add_argument('--min-loss',dest='min_loss', type=float, default=50)
+    parser.add_argument('--save-freq', dest='save_freq', type=int, default=1)
 
     # for testing
     parser.add_argument('--test', dest='test', action='store_true', default=False)

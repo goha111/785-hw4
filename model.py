@@ -72,15 +72,15 @@ class VLSTM(nn.Module):
         super().__init__()
         self.lstm = nn.LSTM(*args, **kwargs)
         num_directions = 2 if self.lstm.bidirectional else 1
-        self.h_0 = nn.Parameter(torch.zeros(self.lstm.num_layers * num_directions, 1, self.lstm.hidden_size))
-        # TODO: learn c_0 here
+        self.inith = nn.Parameter(torch.zeros(self.lstm.num_layers * num_directions, 1, self.lstm.hidden_size))
+        self.initc = nn.Parameter(torch.zeros(self.lstm.num_layers * num_directions, 1, self.lstm.hidden_size))
 
     def forward(self, seqs, seq_lens):
         batch_size = seqs.shape[1]
-        h_0 = self.h_0.expand(-1, batch_size, -1).contiguous()
-        c_0 = Variable(h_0.data.new(h_0.shape).zero_())
+        inith = self.inith.expand(-1, batch_size, -1).contiguous()
+        initc = self.initc.expand(-1, batch_size, -1).contiguous()
         input = pack_padded_sequence(seqs, seq_lens)
-        output, _ = self.lstm(input, (h_0, c_0))
+        output, _ = self.lstm(input, (inith, initc))
         seqs, _ = pad_packed_sequence(output)
         return seqs, seq_lens
 
@@ -98,13 +98,15 @@ class SequencePooling(nn.Module):
         return seqs, seq_lens
 
 class PBLSTM(nn.Module):
-    def __init__(self, input_size, hidden_size):
+    def __init__(self, input_size, hidden_size, dropout=.0):
         super().__init__()
         self.pooling = SequencePooling()
+        self.dropout = nn.Dropout(dropout)
         self.blstm = VLSTM(input_size=input_size * 2, hidden_size=hidden_size, bidirectional=True)
 
     def forward(self, seqs, seq_lens):
         seqs, seq_lens = self.pooling(seqs, seq_lens)
+        seqs = self.dropout(seqs)
         seqs, seq_lens = self.blstm(seqs, seq_lens)
         return seqs, seq_lens
 
@@ -128,9 +130,9 @@ class Listener(nn.Module):
         self.blstms = nn.ModuleList([
             # TODO: batchNorm1d at the beginning
             VLSTM(input_size=input_size, hidden_size=hidden_size, bidirectional=True),
-            PBLSTM(input_size=hidden_size*2, hidden_size=hidden_size),
-            PBLSTM(input_size=hidden_size*2, hidden_size=hidden_size),
-            PBLSTM(input_size=hidden_size*2, hidden_size=hidden_size),
+            PBLSTM(input_size=hidden_size*2, hidden_size=hidden_size, dropout=.1),
+            PBLSTM(input_size=hidden_size*2, hidden_size=hidden_size, dropout=.1),
+            PBLSTM(input_size=hidden_size*2, hidden_size=hidden_size, dropout=.1),
         ])
 
     def forward(self, seqs, seq_lens):
@@ -148,8 +150,10 @@ class Speller(nn.Module):
         self.embedding = nn.Embedding(char_dict_size, hidden_size)
         self.rnns = MLLSTMCell(input_size=hidden_size*2, hidden_size=hidden_size, num_layers=3, dropout=.2)
         self.inith = nn.ParameterList()
+        self.initc = nn.ParameterList()
         for i in range(3):
             self.inith.append(nn.Parameter(torch.zeros(1, hidden_size)))
+            self.initc.append(nn.Parameter(torch.zeros(1, hidden_size)))
 
         activation = nn.ELU()
         # map hidden states to queries
@@ -239,7 +243,7 @@ class Speller(nn.Module):
         N, T = label_in.shape
         # expand initial states of LSTMCell to batch size
         hidden = [tensor.repeat(N, 1) for tensor in self.inith]
-        cell = [Variable(h.data.new(h.shape).zero_()) for h in hidden]
+        cell = [tensor.repeat(N, 1) for tensor in self.initc]
         output = []
         label_in = self.embedding(label_in)     # (N, max_trans_len, E)
         key = self.key_net(seqs).transpose(0, 1)        # (L, N, input_size) -> (L, N, Q) -> (N, L, Q)
@@ -273,7 +277,7 @@ class Speller(nn.Module):
         assert(N == T == 1)   #  one batch, one input, which is SOS
         # expand initial states of LSTMCell to batch size
         hidden = [tensor.repeat(N, 1) for tensor in self.inith]
-        cell = [Variable(h.data.new(h.shape).zero_()) for h in hidden]
+        cell = [tensor.repeat(N, 1) for tensor in self.initc]
         output = []
         key = self.key_net(seqs).transpose(0, 1)  # (L, N, input_size) -> (L, N, Q) -> (N, L, Q)
         value = self.value_net(seqs).transpose(0, 1)  # (L, N, input_size) -> (L, N, V) -> (N, L, V)
