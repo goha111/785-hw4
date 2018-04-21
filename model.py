@@ -296,7 +296,7 @@ class Speller(nn.Module):
         N, T = label_in.shape
         assert(N == T == 1)   #  one batch, one input, which is SOS
         # expand initial states of LSTMCell to batch size
-        hidden = self.inith
+        hidden = [tensor.repeat(N, 1) for tensor in self.inith]
         cell = [Variable(h.data.new(h.shape).zero_()) for h in hidden]
         output = []
         key = self.key_net(seqs).transpose(0, 1)  # (L, N, input_size) -> (L, N, Q) -> (N, L, Q)
