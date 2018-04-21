@@ -139,7 +139,7 @@ class Listener(nn.Module):
         return seqs, seq_lens
 
 class Speller(nn.Module):
-    def __init__(self, char_dict_size=33, input_size=512, hidden_size=256, query_size=128, feed_forward_ratio=.1):
+    def __init__(self, char_dict_size=CHAR_SIZE, input_size=512, hidden_size=256, query_size=128, feed_forward_ratio=.1):
         super().__init__()
         self.char_dict_size = char_dict_size
         self.input_size = input_size
@@ -284,10 +284,10 @@ class Speller(nn.Module):
         return torch.cat(output, dim=1)[0]
 
 class LASModel(nn.Module):
-    def __init__(self, char_dict_size, projection_bias=None):
+    def __init__(self, projection_bias=None):
         super().__init__()
         self.listener = Listener()
-        self.speller = Speller(char_dict_size=char_dict_size)
+        self.speller = Speller()
         self.apply(initializer)
         if projection_bias is not None:
             self.speller.apply_projection_bias(projection_bias)

@@ -77,7 +77,7 @@ def train(args):
         print('loading model: {}'.format(args.model))
         model = torch.load(args.model, map_location=lambda storage, loc: storage)
     else:
-        model = LASModel(char_dict_size=CHAR_SIZE, projection_bias=projection_bias)
+        model = LASModel(projection_bias=projection_bias)
         model.float()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-5)
     criterion = CrossEntropyLoss3D(reduce=False)
