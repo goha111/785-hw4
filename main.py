@@ -1,5 +1,6 @@
 from model import *
 from char_list import *
+from loader import *
 
 import argparse
 import os
@@ -58,10 +59,10 @@ def routine(args, model, loader, optimizer, criterion, epoch, train=True):
                   'time: {time:.4f}'.format(epoch, i, len(loader), loss=losses, time=running_time))
     return losses.avg
 
-def main(args):
+def train(args):
     if not os.path.exists(args.save_dir):
         os.makedirs(args.save_dir)
-    xtrain, ytrain = load_data('train')
+    xtrain, ytrain = load_data('dev')
     xvalid, yvalid = load_data('dev')
     stat_encode = np.load('stat_encode.npy')
     projection_bias = torch.FloatTensor(unigram_logits(stat_encode))
@@ -93,6 +94,9 @@ def main(args):
             torch.save(model, '{}/{:.4f}.pt'.format(args.save_dir, loss))
         min_loss = min(loss, min_loss)
 
+def test(args):
+    pass
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--batch-size', '-b', dest='batch_size', type=int, default=32)
@@ -101,6 +105,11 @@ if __name__ == '__main__':
     parser.add_argument('--epoch', dest='epoch', type=int, default=30)
     parser.add_argument('--lr', dest='lr', type=float, default=1e-3)
     parser.add_argument('--save-dir', dest='save_dir', type=str, default='models')
+    parser.add_argument('--test', dest='test', action='store_true', default=False)
     args = parser.parse_args()
     print(args)
-    main(args)
+
+    if (args.test):
+        test(args)
+    else:
+        train(args)
