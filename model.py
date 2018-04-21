@@ -197,8 +197,8 @@ class Speller(nn.Module):
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.embedding = nn.Embedding(char_dict_size, hidden_size)
-        self.inith = nn.ParameterList()
         self.rnns = MLLSTMCell(input_size=hidden_size*2, hidden_size=hidden_size, num_layers=3, dropout=.2)
+        self.inith = nn.ParameterList()
         for i in range(3):
             self.inith.append(nn.Parameter(torch.zeros(1, hidden_size)))
 
@@ -258,7 +258,9 @@ class Speller(nn.Module):
     # seqs(h): (L, N, C)
     # seq_lens: (N)
     # label_in(y): (N, T)
-    def forward(self, seqs, seq_lens, label_in):
+
+    #output: (T, N, char_size)
+    def forward(self, seqs, seq_lens, label_in, predict=False):
         N, T = label_in.shape
         # expand initial states of LSTMCell to batch size
         hidden = [tensor.repeat(N, 1) for tensor in self.inith]
@@ -284,6 +286,40 @@ class Speller(nn.Module):
             output.append(self.output_layer(torch.cat((curr_context, hidden[-1]), dim=1)))
             prev_context = curr_context
         return torch.stack(output)
+
+    # seqs(h): (L, N, C)
+    # seq_lens: (N)
+    # label_in(y): (N, T)
+
+    #output: (1， len_sentence)
+    def predict(self, seqs, seq_lens, label_in):
+        N, T = label_in.shape
+        assert(N == T == 1)   #  one batch, one input, which is SOS
+        # expand initial states of LSTMCell to batch size
+        hidden = self.inith
+        cell = [Variable(h.data.new(h.shape).zero_()) for h in hidden]
+        output = []
+        key = self.key_net(seqs).transpose(0, 1)  # (L, N, input_size) -> (L, N, Q) -> (N, L, Q)
+        value = self.value_net(seqs).transpose(0, 1)  # (L, N, input_size) -> (L, N, V) -> (N, L, V)
+        query = self.query_net(hidden[-1]).unsqueeze(-1)  # (N, hidden_size) -> (N, Q) -> (N, Q, 1)
+        prev_context = self.attention_context(query, key, value, seq_lens)  # (N, V)
+        output.append(label_in)
+        while True:
+            char_input = self.embedding(label_in)  # (1, 1, E)
+            rnn_input = torch.cat((prev_context, char_input[:, 0, :]), dim=1)
+            hidden, cell = self.rnns(rnn_input, hidden, cell)
+            query = self.query_net(hidden[-1]).unsqueeze(-1)
+            curr_context = self.attention_context(query, key, value, seq_lens)  # calculate current context
+            out = self.output_layer(torch.cat((curr_context, hidden[-1]), dim=1))  # (1, char_size)
+            gumbel = Variable(sample_gumbel(shape=out.size(), out=out.data.new()))
+            out = out + gumbel
+            label_in = out.max(dim=1)[1].unsqueeze(-1)  # (1, ) -> (1, 1)
+            output.append(label_in)
+            if label_in.data[0][0] == EOS:
+                break
+            else:
+                prev_context = curr_context
+        return torch.cat(output, dim=1)
 
 class LASModel(nn.Module):
     def __init__(self, char_dict_size, projection_bias=None):
