@@ -73,7 +73,7 @@ class VLSTM(nn.Module):
         self.lstm = nn.LSTM(*args, **kwargs)
         num_directions = 2 if self.lstm.bidirectional else 1
         self.h_0 = nn.Parameter(torch.zeros(self.lstm.num_layers * num_directions, 1, self.lstm.hidden_size))
-        self.c_0 = nn.Parameter(torch.zeros(self.lstm.num_layers * num_directions, 1, self.lstm.hidden_size))
+        # TODO: learn c_0 here
 
     def forward(self, seqs, seq_lens):
         batch_size = seqs.shape[1]
@@ -171,7 +171,7 @@ class Speller(nn.Module):
         ], activation)
 
         self.output_layer = MLP([
-            nn.Linear(hidden_size*2, hidden_size),
+            nn.Linear(hidden_size + query_size, hidden_size),
             nn.Linear(hidden_size, char_dict_size)
         ])
 
@@ -181,7 +181,7 @@ class Speller(nn.Module):
     def apply_projection_bias(self, projection_bias):
         self.output_layer[-1].bias.data = projection_bias
 
-    # query:    (N, Q, 1)
+    # query:    (N, Q)
     # key:      (N, L, Q)
     # value:    (N, L, V)
     # seq_lens: (N, )
@@ -189,6 +189,7 @@ class Speller(nn.Module):
     # return    (N, V)
     def attention_context(self, query, key, value, seq_lens):
         N, L, _ = key.shape
+        query = query.unsqueeze(-1)   # (N, Q) -> (N, Q, 1)
 
         # (N, L, Q) @ (N, Q, 1) -> (N, L, 1) -> (N, 1, L) -> softmax along L -> (N, 1, L)
         attention = F.softmax(torch.bmm(key, query).transpose(1, 2), dim=2)
@@ -213,6 +214,22 @@ class Speller(nn.Module):
         char_input = logit.max(dim=1, keepdim=True)[1]  # (N, 1)
         return char_input
 
+    # key:      (N, L, Q)
+    # value:    (N, L, V)
+    # seq_lens: (N,)
+    # prev_cont:(N, V)
+    # char_input: (N, E)
+    # hidden: list of hidden_states
+    # cell:   list of cell_states
+    def attention_and_spell(self, key, value, seq_lens, context, char_input, hidden, cell):
+        # (N, E) concat (N, V) -> (N, E+V)
+        rnn_input = torch.cat([context, char_input], dim=1)
+        hidden, cell = self.rnns(rnn_input, hidden, cell)
+        query = self.query_net(hidden[-1])  # calculate current query
+        context = self.attention_context(query, key, value, seq_lens)  # calculate current context
+        logit = self.output_layer(torch.cat([context, query], dim=1))  # (N, char_size)
+        return logit, context, hidden, cell
+
     # seqs(h): (L, N, C)
     # seq_lens: (N)
     # label_in(y): (N, T)
@@ -227,15 +244,14 @@ class Speller(nn.Module):
         label_in = self.embedding(label_in)     # (N, max_trans_len, E)
         key = self.key_net(seqs).transpose(0, 1)        # (L, N, input_size) -> (L, N, Q) -> (N, L, Q)
         value = self.value_net(seqs).transpose(0, 1)    # (L, N, input_size) -> (L, N, V) -> (N, L, V)
-        query = self.query_net(hidden[-1]).unsqueeze(-1)    # (N, hidden_size) -> (N, Q) -> (N, Q, 1)
-        prev_context = self.attention_context(query, key, value, seq_lens)    # (N, V)
+        query = self.query_net(hidden[-1])      # (N, hidden_size) -> (N, Q)
+        context = self.attention_context(query, key, value, seq_lens)    # (N, V)
 
         # 1. do LSTM with prev context and prev states
         # 2. get query with new hidden states
         # 3. get current context
         # 4. concatenate current context with current hidden state and then feed into output_network
         for t in range(T):
-            # (N, E) concat (N, V) -> (N, E+V)
             rand_num = np.random.rand()
             if rand_num < self.feed_forward_ratio and t > 0:  # sample from previous output
                 char_input = self.sample_output(output[-1])   # (N, 1)
@@ -243,12 +259,8 @@ class Speller(nn.Module):
                 char_input = embedded.view(N, -1)  #(N, E)
             else:
                 char_input = label_in[:,t,:]
-            rnn_input = torch.cat((prev_context, char_input), dim=1)
-            hidden, cell = self.rnns(rnn_input, hidden, cell)
-            query = self.query_net(hidden[-1]).unsqueeze(-1)    # calculate current query
-            curr_context = self.attention_context(query, key, value, seq_lens)   # calculate current context
-            output.append(self.output_layer(torch.cat((curr_context, query), dim=1)))
-            prev_context = curr_context
+            logit, context, hidden, cell = self.attention_and_spell(key, value, seq_lens, context, char_input, hidden, cell)
+            output.append(logit)
         return torch.stack(output)
 
     # seqs(h): (L, N, C)
@@ -265,22 +277,17 @@ class Speller(nn.Module):
         output = []
         key = self.key_net(seqs).transpose(0, 1)  # (L, N, input_size) -> (L, N, Q) -> (N, L, Q)
         value = self.value_net(seqs).transpose(0, 1)  # (L, N, input_size) -> (L, N, V) -> (N, L, V)
-        query = self.query_net(hidden[-1]).unsqueeze(-1)  # (N, hidden_size) -> (N, Q) -> (N, Q, 1)
-        prev_context = self.attention_context(query, key, value, seq_lens)  # (N, V)
+        query = self.query_net(hidden[-1])   # (N, hidden_size) -> (N, Q)
+        context = self.attention_context(query, key, value, seq_lens)  # (N, V)
         output.append(label_in)
         while True:
-            label_in = self.embedding(label_in)  # (1, 1, E)
-            rnn_input = torch.cat((prev_context, label_in[:, 0, :]), dim=1)
-            hidden, cell = self.rnns(rnn_input, hidden, cell)
-            query = self.query_net(hidden[-1]).unsqueeze(-1)
-            curr_context = self.attention_context(query, key, value, seq_lens)  # calculate current context
-            logit = self.output_layer(torch.cat((curr_context, query), dim=1))  # (1, char_size)
+            embedded = self.embedding(label_in)  # (1, 1, E)
+            char_input = embedded.view(N, -1)   # (1, E)
+            logit, context, hidden, cell = self.attention_and_spell(key, value, seq_lens, context, char_input, hidden, cell)
             label_in = self.sample_output(logit)  # (1, 1)
             output.append(label_in)
             if label_in.data[0][0] == EOS_IDX:
                 break
-            else:
-                prev_context = curr_context
         return torch.cat(output, dim=1)[0]
 
 class LASModel(nn.Module):
