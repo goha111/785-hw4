@@ -218,7 +218,7 @@ class Speller(nn.Module):
     # label_in(y): (N, T)
 
     #output: (T, N, char_size)
-    def forward(self, seqs, seq_lens, label_in, predict=False):
+    def forward(self, seqs, seq_lens, label_in):
         N, T = label_in.shape
         # expand initial states of LSTMCell to batch size
         hidden = [tensor.repeat(N, 1) for tensor in self.inith]

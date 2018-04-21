@@ -3,8 +3,8 @@ ENCODE_MAP = {'%': 0, ' ': 1, "'": 2, '+': 3, '-': 4, '.': 5, 'A': 6, 'B': 7, 'C
 DECODE_MAP = ['%', ' ', "'", '+', '-', '.', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '_']
 assert(len(ENCODE_MAP) == len(DECODE_MAP))
 CHAR_SIZE = len(ENCODE_MAP)
+
 SOS = '%'
 EOS = '%'
-
 SOS_IDX = ENCODE_MAP[SOS]
 EOS_IDX = ENCODE_MAP[EOS]

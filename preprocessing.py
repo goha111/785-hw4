@@ -14,13 +14,7 @@ def encode(args, array, char_map):
         output.append(arr)
     return np.array(output)
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--start', '-s', dest='SOS', type=str, default='%')
-    parser.add_argument('--end', '-e', dest='EOS', type=str, default='%')
-    args = parser.parse_args()
-    print(args)
-
+def main(args):
     SOS = args.SOS
     EOS = args.EOS
 
@@ -63,6 +57,10 @@ def main():
     stat_encode = np.array([[char_map[k], v] for k, v in stat])
     np.save('stat_encode.npy', stat_encode)
 
-
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--start', '-s', dest='SOS', type=str, default='%')
+    parser.add_argument('--end', '-e', dest='EOS', type=str, default='%')
+    args = parser.parse_args()
+    print(args)
+    main(args)
