@@ -141,7 +141,7 @@ class Listener(nn.Module):
         return seqs, seq_lens
 
 class Speller(nn.Module):
-    def __init__(self, char_dict_size=CHAR_SIZE, input_size=512, hidden_size=256, query_size=128, feed_forward_ratio=.1):
+    def __init__(self, char_dict_size=CHAR_SIZE, input_size=512, hidden_size=256, query_size=256, feed_forward_ratio=.1):
         super().__init__()
         self.char_dict_size = char_dict_size
         self.input_size = input_size
@@ -163,7 +163,7 @@ class Speller(nn.Module):
         self.key_net = nn.Linear(input_size, query_size)
 
         # map input to values
-        self.value_net = nn.Linear(input_size, hidden_size)
+        self.value_net = self.key_net
 
         self.output_layer = MLP([
             nn.Linear(hidden_size + query_size, hidden_size),

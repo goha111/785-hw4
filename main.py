@@ -80,11 +80,9 @@ def train(args):
         model.float()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-5)
     criterion = CrossEntropyLoss3D(reduce=False)
-
     if CUDA_AVAILABLE:
         model.cuda()
         criterion.cuda()
-
 
     for epoch in range(args.epoch):
         print('-' * 10 + 'epoch {}: train'.format(epoch) + '-' * 10)
@@ -94,9 +92,10 @@ def train(args):
         loss = routine(args, model, valid_loader, optimizer, criterion, epoch, False)
         print('valid epoch {}:\tloss={:.4f}'.format(epoch, loss))
         if epoch % args.save_freq == 0:
-            print('Saving new model to: {}/{}_{:.4f}.pt'.format(args.save_dir, epoch, loss))
-            torch.save(model, '{}/{:.4f}.pt'.format(args.save_dir, loss))
-
+            filename = '{}_{:.4f}.pt'.format(epoch, loss)
+            path = os.path.join(args.save_dir, filename)
+            print('Saving new model to: {}'.format(path))
+            torch.save(model, path)
 
 def generate_sequence(model, seq, seq_len, num_seq=10):
     result = []
@@ -154,7 +153,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--batch-size', '-b', dest='batch_size', type=int, default=32)
     parser.add_argument('--model', '-m', dest='model', type=str, default=None)
-    parser.add_argument('--print-freq', dest='print_freq', type=int, default=10)
+    parser.add_argument('--print-freq', dest='print_freq', type=int, default=25)
     parser.add_argument('--epoch', dest='epoch', type=int, default=30)
     parser.add_argument('--lr', dest='lr', type=float, default=1e-3)
     parser.add_argument('--save-dir', dest='save_dir', type=str, default='models')
