@@ -130,9 +130,9 @@ class Listener(nn.Module):
         self.blstms = nn.ModuleList([
             # TODO: batchNorm1d at the beginning
             VLSTM(input_size=input_size, hidden_size=hidden_size, bidirectional=True),
-            PBLSTM(input_size=hidden_size*2, hidden_size=hidden_size, dropout=.1),
-            PBLSTM(input_size=hidden_size*2, hidden_size=hidden_size, dropout=.1),
-            PBLSTM(input_size=hidden_size*2, hidden_size=hidden_size, dropout=.1),
+            PBLSTM(input_size=hidden_size*2, hidden_size=hidden_size, dropout=.2),
+            PBLSTM(input_size=hidden_size*2, hidden_size=hidden_size, dropout=.2),
+            PBLSTM(input_size=hidden_size*2, hidden_size=hidden_size, dropout=.2),
         ])
 
     def forward(self, seqs, seq_lens):
@@ -157,22 +157,13 @@ class Speller(nn.Module):
 
         activation = nn.ELU()
         # map hidden states to queries
-        self.query_net = MLP([
-            nn.Linear(hidden_size, hidden_size),
-            nn.Linear(hidden_size, query_size)
-        ], activation)
+        self.query_net = nn.Linear(hidden_size, query_size)
 
         # map input to keys
-        self.key_net = MLP([
-            nn.Linear(input_size, input_size),
-            nn.Linear(input_size, query_size)
-        ], activation)
+        self.key_net = nn.Linear(input_size, query_size)
 
         # map input to values
-        self.value_net = MLP([
-            nn.Linear(input_size, hidden_size),
-            nn.Linear(hidden_size, hidden_size)
-        ], activation)
+        self.value_net = nn.Linear(input_size, hidden_size)
 
         self.output_layer = MLP([
             nn.Linear(hidden_size + query_size, hidden_size),
