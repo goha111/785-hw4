@@ -8,6 +8,8 @@ import time
 import numpy as np
 import pandas as pd
 import torch
+from torch.utils.data import DataLoader
+
 
 CUDA_AVAILABLE = torch.cuda.is_available()
 
@@ -66,12 +68,12 @@ def train(args):
     print('Train mode')
     if not os.path.exists(args.save_dir):
         os.makedirs(args.save_dir)
-    xtrain, ytrain = load_data('train')
-    xvalid, yvalid = load_data('dev')
     stat_encode = np.load('stat_encode.npy')
     projection_bias = torch.FloatTensor(unigram_logits(stat_encode))
-    train_loader = DataLoader(xtrain, ytrain, batch_size=args.batch_size)
-    valid_loader = DataLoader(xvalid, yvalid, batch_size=args.batch_size)
+    train_data = Dataset(*load_data('train'))
+    valid_data = Dataset(*load_data('dev'))
+    train_loader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn, drop_last=False)
+    valid_loader = DataLoader(valid_data, batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn, drop_last=False)
     if args.model:
         print('loading model: {}'.format(args.model))
         model = torch.load(args.model, map_location=lambda storage, loc: storage)
