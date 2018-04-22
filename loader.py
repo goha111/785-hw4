@@ -14,25 +14,26 @@ class DataLoader():
         self.size = len(x)
         self.channel = x[0].shape[1]
         self.perm_idx = np.arange(self.size)
-        self.len = ((self.size - self.batch_size) // self.batch_size) + 1
+        self.len = (self.size + self.batch_size - 1) // self.batch_size
 
     def __iter__(self):
         if self.random:
             np.random.shuffle(self.perm_idx)
-        for i in range(0, self.size - self.batch_size + 1, self.batch_size):
-            idx = self.perm_idx[i:i + self.batch_size]
+        for i in range(0, self.size, self.batch_size):
+            batch_size = min(self.batch_size, self.size - i)
+            idx = self.perm_idx[i:i + batch_size]
             seqs, labels = self.x[idx], self.y[idx]
             seq_lengths = torch.IntTensor(list(map(lambda x: x.shape[0], seqs)))
             # because transcript contains SOS and EOS already
-            label_lengths = torch.IntTensor(list(map(lambda x: x.shape[0], labels))) - 1
+            label_lengths = np.array([len(x) for x in labels]) - 1
             max_seq_len = seq_lengths.max()
             max_label_len = label_lengths.max()
 
             # allocate spaces
-            seq_padded = np.zeros((self.batch_size, max_seq_len, self.channel), dtype=float)  # (n, max_len, channel)
-            label_in_padded = np.zeros((self.batch_size, max_label_len), dtype=int)
-            label_out_padded = np.zeros((self.batch_size, max_label_len), dtype=int)
-            label_mask = np.zeros((self.batch_size, max_label_len), dtype=float)
+            seq_padded = np.zeros((batch_size, max_seq_len, self.channel), dtype=float)  # (n, max_len, channel)
+            label_in_padded = np.zeros((batch_size, max_label_len), dtype=int)
+            label_out_padded = np.zeros((batch_size, max_label_len), dtype=int)
+            label_mask = np.zeros((batch_size, max_label_len), dtype=float)
 
             for i, (seq, seq_len, label, label_len) in enumerate(zip(seqs, seq_lengths, labels, label_lengths)):
                 seq_padded[i, :seq_len, :] = seq
@@ -46,12 +47,14 @@ class DataLoader():
             label_in_padded = to_variable(label_in_padded[perm_idx]).long()
             label_out_padded = to_variable(label_out_padded[perm_idx]).long()
             label_mask = to_variable(label_mask[perm_idx]).float()
+            label_lengths = label_lengths[perm_idx]
 
             # seq_padded: (max_seq_len, n, channel)
             # seq_lengths: (n,)
             # lable_length: (n,)
             # label_in_padded, label_out_padded, label_mask: (n, max_label_len)
-            yield (seq_padded, seq_lengths.numpy(), label_in_padded, label_out_padded, label_mask)
+            yield (seq_padded, seq_lengths.numpy(),
+                   label_in_padded, label_out_padded, label_mask, label_lengths)
 
     def __len__(self):
         return self.len

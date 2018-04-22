@@ -12,7 +12,7 @@ import torch
 CUDA_AVAILABLE = torch.cuda.is_available()
 
 def decode(seq):
-    return ''.join([DECODE_MAP[c] for c in seq[1:-1]])
+    return ''.join([DECODE_MAP[c] for c in seq])
 
 def to_cuda(*tensors):
     if CUDA_AVAILABLE:
@@ -40,14 +40,14 @@ def routine(args, model, loader, optimizer, criterion, epoch, train=True):
         model.eval()
     losses = AverageMeter()
     start = time.time()
-    for i, (seq, seq_len, label_in, label_out, label_mask) in enumerate(loader):
+    for i, (seq, seq_len, label_in, label_out, label_mask, _) in enumerate(loader):
         seq, label_in, label_out, label_mask = to_cuda(seq, label_in, label_out, label_mask)
         logits = model(seq, seq_len, label_in).transpose(0, 1).contiguous()  # (T, N, char_size) -> (N, T, char_size)
         loss_raw = criterion(logits, label_out)   # (N, T)
         loss = (loss_raw * label_mask).clamp(min=1e-9).sum(dim=1).mean()   # use clamp to make dot product num_stable
 
         # update metrics
-        losses.update(loss.data.cpu()[0], args.batch_size)
+        losses.update(loss.data.cpu()[0], len(seq_len))
 
         if train:
             optimizer.zero_grad()
@@ -125,18 +125,23 @@ def test(args):
         # (L, 1, T) ->(L, N, T) -> (N, L, T)
         seq = seq.data.expand(-1, args.num_seq, -1).transpose(0, 1).cpu().numpy()
         eval_loader = DataLoader(seq, candidate, batch_size=args.num_seq, random=False)
-        seq, seq_len, label_in, label_out, label_mask = next(eval_loader.__iter__())
-        seq, label_in, label_out, label_mask = to_cuda(seq, label_in, label_out, label_mask)
-        logits = model(seq, seq_len, label_in).transpose(0, 1).contiguous()  # (T, N, char_size) -> (N, T, char_size)
-        loss_raw = criterion(logits, label_out)  # (N, T)
-        losses = (loss_raw * label_mask).clamp(min=1e-9).sum(dim=1).data.cpu().numpy()
-        loss, idx = losses.min(), losses.argmin()
-        total_loss += loss
-        decoded = decode(candidate[idx])
+        min_loss = 1e5
+        best_seq = None
+        for seq, seq_len, label_in, label_out, label_mask, label_len in eval_loader:
+            seq, label_in, label_out, label_mask = to_cuda(seq, label_in, label_out, label_mask)
+            logits = model(seq, seq_len, label_in).transpose(0, 1).contiguous()  # (T, N, char_size) -> (N, T, char_size)
+            loss_raw = criterion(logits, label_out)  # (N, T)
+            losses = (loss_raw * label_mask).clamp(min=1e-9).sum(dim=1).data.cpu().numpy()
+            loss, idx = losses.min(), losses.argmin()
+            if loss < min_loss:
+                min_loss = loss
+                best_seq = label_in.data.cpu()[idx, 1:label_len[idx]]
+        total_loss += min_loss
+        decoded = decode(best_seq)
         running_time = time.time() - start
         if args.verbose:
             print('seq: {}\tloss: {:.4f}\ttime: {:.4f}\n'
-                  'str: {}\n'.format(i, loss, running_time, decoded))
+                  'str: {}\n'.format(i, min_loss, running_time, decoded))
         result.append(decoded)
 
     print('Average Loss: {:.4f}'.format(total_loss / len(result)))
@@ -154,7 +159,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch-size', '-b', dest='batch_size', type=int, default=32)
     parser.add_argument('--model', '-m', dest='model', type=str, default=None)
     parser.add_argument('--print-freq', dest='print_freq', type=int, default=25)
-    parser.add_argument('--epoch', dest='epoch', type=int, default=30)
+    parser.add_argument('--epoch', dest='epoch', type=int, default=20)
     parser.add_argument('--lr', dest='lr', type=float, default=1e-3)
     parser.add_argument('--save-dir', dest='save_dir', type=str, default='models')
     parser.add_argument('--no-cuda', dest='cuda', action='store_false', default=True)
