@@ -76,7 +76,7 @@ def train(args):
         print('loading model: {}'.format(args.model))
         model = torch.load(args.model, map_location=lambda storage, loc: storage)
     else:
-        model = LASModel(projection_bias=projection_bias)
+        model = LASModel(feed_forward_ratio=args.feed_forward_ratio, projection_bias=projection_bias)
         model.float()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-5)
     criterion = CrossEntropyLoss3D(reduce=False)
@@ -161,10 +161,11 @@ if __name__ == '__main__':
     parser.add_argument('--no-cuda', dest='cuda', action='store_false', default=True)
     parser.add_argument('--min-loss',dest='min_loss', type=float, default=50)
     parser.add_argument('--save-freq', dest='save_freq', type=int, default=1)
+    parser.add_argument('--feed-forward', dest='feed_forward_ratio', type=float, default=.1)
 
     # for testing
     parser.add_argument('--test', dest='test', action='store_true', default=False)
-    parser.add_argument('--num-seq', dest='num_seq', type=int, default=10)
+    parser.add_argument('--num-seq', dest='num_seq', type=int, default=32)
     parser.add_argument('--test-dir', dest='test_dir', type=str, default='result')
     parser.add_argument('--verbose', '-v', dest='verbose', action='store_true', default=False)
     args = parser.parse_args()

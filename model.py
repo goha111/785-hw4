@@ -296,10 +296,10 @@ class Speller(nn.Module):
 
 class LASModel(nn.Module):
     dump_patches = True
-    def __init__(self, projection_bias=None):
+    def __init__(self, feed_forward_ratio=.1, projection_bias=None):
         super().__init__()
         self.listener = Listener()
-        self.speller = Speller()
+        self.speller = Speller(feed_forward_ratio=feed_forward_ratio)
         self.apply(initializer)
         if projection_bias is not None:
             self.speller.apply_projection_bias(projection_bias)
