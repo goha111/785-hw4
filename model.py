@@ -163,7 +163,7 @@ class Speller(nn.Module):
         self.key_net = nn.Linear(input_size, query_size)
 
         # map input to values
-        self.value_net = self.key_net
+        self.value_net = nn.Linear(input_size, hidden_size)
 
         self.output_layer = MLP([
             nn.Linear(hidden_size + query_size, hidden_size),
