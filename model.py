@@ -127,18 +127,9 @@ class MLP(nn.ModuleList):
 class Listener(nn.Module):
     def __init__(self, input_size=40, hidden_size=256):
         super().__init__()
-        self.cnns = nn.Sequential(
-            nn.Conv1d(input_size, hidden_size, 3, padding=1),
-            nn.LeakyReLU(),
-            nn.BatchNorm1d(hidden_size),
-            nn.Conv1d(hidden_size, hidden_size, 3, padding=1),
-            nn.LeakyReLU(),
-            nn.BatchNorm1d(hidden_size),
-        )
-
         self.blstms = nn.ModuleList([
             # TODO: batchNorm1d at the beginning
-            VLSTM(input_size=hidden_size, hidden_size=hidden_size, bidirectional=True),
+            VLSTM(input_size=input_size, hidden_size=hidden_size, bidirectional=True),
             PBLSTM(input_size=hidden_size*2, hidden_size=hidden_size, dropout=.2),
             PBLSTM(input_size=hidden_size*2, hidden_size=hidden_size, dropout=.2),
             PBLSTM(input_size=hidden_size*2, hidden_size=hidden_size, dropout=.2),
@@ -146,9 +137,6 @@ class Listener(nn.Module):
 
     # seq: (L, N, C)
     def forward(self, seqs, seq_lens):
-        seqs = seqs.transpose(0, 1).transpose(1, 2)   # (L, N, C) - (N, L, C) - (N, C, L)
-        seqs = self.cnns(seqs)
-        seqs = seqs.transpose(1, 2).transpose(0, 1)   # (N, C, L) - (N, L, C) - (L, N, C)
         for lstm in self.blstms:
             seqs, seq_lens = lstm(seqs, seq_lens)
         return seqs, seq_lens
@@ -178,10 +166,10 @@ class Speller(nn.Module):
         # map input to values
         self.value_net = nn.Linear(input_size, hidden_size)
 
-        self.output_layer = MLP([
+        self.output_layer = nn.Sequential(
             nn.Linear(hidden_size + query_size, hidden_size),
             nn.Linear(hidden_size, char_dict_size)
-        ])
+        )
 
         # weight tying
         self.output_layer[-1].weight= self.embedding.weight
