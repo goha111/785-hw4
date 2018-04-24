@@ -126,7 +126,9 @@ def test(args):
         candidate = generate_sequence(model, seq, seq_len, args.num_seq)
         # (L, 1, T) ->(L, N, T) -> (N, L, T)
         seq = seq.data.expand(-1, args.num_seq, -1).transpose(0, 1).cpu().numpy()
-        eval_loader = DataLoader(seq, candidate, batch_size=args.batch_size, random=False)
+        eval_dataset = Dataset(seq, candidate)
+        eval_loader = DataLoader(eval_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4,
+                                 collate_fn=collate_fn, drop_last=False)
         min_loss = 1e5
         best_seq = None
         for seq, seq_len, label_in, label_out, label_mask, label_len in eval_loader:
